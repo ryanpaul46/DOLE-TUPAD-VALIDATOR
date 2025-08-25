@@ -1,22 +1,34 @@
-# Use official Node.js image
+# ---------- FRONTEND BUILD ----------
 FROM node:20 AS frontend
+WORKDIR /app/client
 
-# Set working directory
-WORKDIR /DOLE-TUPAD-VALIDATOR
+# install deps
+COPY client/package*.json ./
+RUN npm install
 
-# Copy server first
-COPY server/package*.json ./server/
-RUN cd server && npm install
+# copy source
+COPY client/ ./
 
-# Copy client
-COPY client/package*.json ./client/
-RUN cd client && npm install && npm run build
+# build frontend
+RUN npm run build
 
-# Copy the rest of the code
-COPY . .
 
-# Expose port
+# ---------- BACKEND ----------
+FROM node:20 AS backend
+WORKDIR /app
+
+# install deps
+COPY server/package*.json ./
+RUN npm install
+
+# copy backend source
+COPY server/ ./
+
+# copy frontend build into backend public folder
+COPY --from=frontend /app/client/dist ./public
+
+# expose backend port
 EXPOSE 4000
 
-# Start server
+# start server
 CMD ["node", "server/index.js"]
