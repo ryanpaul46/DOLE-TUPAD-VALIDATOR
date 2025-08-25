@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "nodemon server/index.js",
+    
     "dev": "node server/index.js",
     "seed": "cd server && node seed.js",
     "client": "npm run dev --prefix client",
     "server": "npm run dev --prefix server",
-    "build": "vite build",
+    "build": "cd client && npm install && npm run build",
+    "start": "cd server && npm install && npm run start",
     "lint": "eslint .",
     "preview": "vite preview"
   },
