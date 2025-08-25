@@ -1,8 +1,8 @@
 # Use official Node.js image
-FROM node:18
+FROM node:20 AS frontend
 
 # Set working directory
-WORKDIR /app
+WORKDIR /DOLE-TUPAD-VALIDATOR
 
 # Copy server first
 COPY server/package*.json ./server/
