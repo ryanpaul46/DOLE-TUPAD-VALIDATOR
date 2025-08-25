@@ -1,14 +1,13 @@
 // src/api/axios.js
 import axios from "axios";
 
+// Determine API base URL based on environment
+const API_BASE_URL = import.meta.env.VITE_API_URL ||
+  (process.env.NODE_ENV === "production"
+    ? "/api"  // When serving frontend from backend in production
+    : "http://localhost:4000/api");  // Development URL
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:4000/api",
-});
-
-const API_BASE_URL = process.env.NODE_ENV === "production"
-  ? "https://dole-tupad-validator.onrender.com/api" : "http://localhost:40000";
-
-const API = axios.create({
   baseURL: API_BASE_URL,
 });
 
