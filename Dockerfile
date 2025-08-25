@@ -26,6 +26,7 @@ COPY server/ ./
 # copy frontend build into backend folder
 COPY --from=frontend /app/client/dist ./client/dist
 
+
 # expose backend port
 EXPOSE 4000
 
