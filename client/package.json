@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm rebuild-- platform=linux && vite build",
     "preview": "vite preview"
   },
   "keywords": [],
@@ -26,4 +26,5 @@
     "@vitejs/plugin-react": "^5.0.1"
 
   }
+  
 }
