@@ -13,7 +13,8 @@
     "start": "cd server && npm ci && npm run start",
     "lint": "eslint .",
     "preview": "vite preview",
-    "render-build": "cd client && npm ci && npm rebuild --platform=linux && npm run build"
+    "render-build": "cd client && npm ci && npm rebuild --platform=linux && npm run build",
+    "railway-build": "cd client && npm ci && npm run build"
   },
   "dependencies": {
     "concurrently": "^9.0.1",

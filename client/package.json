@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
-    "build": "npm rebuild --platform=linux && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "keywords": [],
@@ -24,8 +24,5 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.1"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.0.0"
   }
 }
