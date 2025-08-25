@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "start": "react-scripts start",
-    "build": "react-scripts build && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "keywords": [],
