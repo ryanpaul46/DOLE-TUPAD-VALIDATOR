@@ -1,16 +1,19 @@
 import { useState, useEffect } from "react";
-import { Container, Table } from "react-bootstrap";
+import { Container, Table, Card, Row, Col } from "react-bootstrap";
 import axios from "axios";
 
 export default function ClientDatabase() {
   const [data, setData] = useState([]);
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [uniqueCounts, setUniqueCounts] = useState({
+    total_unique_municipalities: 0,
+    total_unique_provinces: 0
+  });
 
   const fetchData = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/uploaded-beneficiaries");
-      setData(res.data);
+      const res = await axios.get("http://localhost:4000/api/beneficiaries-by-project-series");
+      setData(res.data.projectSeries);
+      setUniqueCounts(res.data.uniqueCounts);
     } catch (err) {
       console.error("Failed fetching data:", err);
     }
@@ -20,41 +23,76 @@ export default function ClientDatabase() {
     fetchData();
   }, []);
 
-  const totalPages = Math.ceil(data.length / itemsPerPage);
-  const paginatedData = data.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  // Calculate totals for summary card
+  const totalBeneficiaries = data.reduce((sum, item) => sum + parseInt(item.beneficiary_count), 0);
 
   return (
     <Container fluid className="p-4 flex-grow-1 overflow-auto" style={{ minHeight: 0 }}>
-      <h2>Database</h2>
+      <h2>Project Series Breakdown</h2>
+      
+      {/* Summary Cards */}
+      <Row className="mb-4">
+        <Col md={3}>
+          <Card className="text-center">
+            <Card.Body>
+              <Card.Title>Total Project Series</Card.Title>
+              <Card.Text className="display-4">{data.length}</Card.Text>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={3}>
+          <Card className="text-center">
+            <Card.Body>
+              <Card.Title>Total Beneficiaries</Card.Title>
+              <Card.Text className="display-4">{totalBeneficiaries}</Card.Text>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={3}>
+          <Card className="text-center">
+            <Card.Body>
+              <Card.Title>Municipalities</Card.Title>
+              <Card.Text className="display-4">{uniqueCounts.total_unique_municipalities}</Card.Text>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={3}>
+          <Card className="text-center">
+            <Card.Body>
+              <Card.Title>Provinces</Card.Title>
+              <Card.Text className="display-4">{uniqueCounts.total_unique_provinces}</Card.Text>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
 
+      {/* Project Series Table */}
       <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
         <Table striped bordered hover size="sm">
           <thead>
             <tr>
-              <th>Project Series No.</th>
-              <th>Municipality/City</th>
-              <th>Province</th>
-              <th>No. of Beneficiaries</th>
+              <th>Project Series</th>
+              <th>Number of Beneficiaries</th>
+              <th>Municipalities Covered</th>
+              <th>Provinces Covered</th>
             </tr>
           </thead>
           <tbody>
-            {paginatedData.map((row, idx) => (
+            {data.map((item, idx) => (
               <tr key={idx}>
-                <td>{row.project_series}</td>
-                <td>{row.city_municipality}</td>
-                <td>{row.province}</td>
-                <td>1</td>
+                <td>{item.project_series}</td>
+                <td>{item.beneficiary_count}</td>
+                <td>{item.municipality_count}</td>
+                <td>{item.province_count}</td>
               </tr>
             ))}
           </tbody>
         </Table>
       </div>
-
-      {totalPages > 1 && (
-        <div className="d-flex justify-content-center gap-2 mt-2">
-          <button disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>Prev</button>
-          <span className="align-self-center">Page {currentPage} of {totalPages}</span>
-          <button disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>Next</button>
+      
+      {data.length === 0 && (
+        <div className="text-center mt-4">
+          <p>No project series data available. Please upload beneficiary data first.</p>
         </div>
       )}
     </Container>

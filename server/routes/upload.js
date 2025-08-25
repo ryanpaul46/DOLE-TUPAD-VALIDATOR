@@ -99,7 +99,7 @@ router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
     const originals = [];
 
     excelData.forEach((row, index) => {
-      const name = row["Name"]; // Column 3 is the Names Header
+      const name = row["name"]; // Column 3 is the Names Header
       if (name) {
         if (dbRecordMap.has(name)) {
           duplicates.push({
@@ -175,6 +175,41 @@ router.delete("/uploaded-clear", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to clear database" });
+  }
+});
+
+// Fetch beneficiaries grouped by project series
+router.get("/beneficiaries-by-project-series", async (req, res) => {
+  try {
+    // Get project series breakdown
+    const projectSeriesResult = await pool.query(`
+      SELECT
+        project_series,
+        COUNT(*) as beneficiary_count,
+        COUNT(DISTINCT city_municipality) as municipality_count,
+        COUNT(DISTINCT province) as province_count
+      FROM uploaded_beneficiaries
+      WHERE project_series IS NOT NULL
+      GROUP BY project_series
+      ORDER BY project_series
+    `);
+    
+    // Get unique counts across all project series
+    const uniqueCountsResult = await pool.query(`
+      SELECT
+        COUNT(DISTINCT city_municipality) as total_unique_municipalities,
+        COUNT(DISTINCT province) as total_unique_provinces
+      FROM uploaded_beneficiaries
+      WHERE project_series IS NOT NULL
+    `);
+    
+    res.json({
+      projectSeries: projectSeriesResult.rows,
+      uniqueCounts: uniqueCountsResult.rows[0]
+    });
+  } catch (err) {
+    console.error("Fetch error:", err);
+    res.status(500).json({ message: "Failed to fetch project series data", error: err.message });
   }
 });
 

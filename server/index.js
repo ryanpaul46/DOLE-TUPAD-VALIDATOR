@@ -13,12 +13,14 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+
+
 export const pool = new pg.Pool({
-  user: process.env.PGUSER,
-  host: process.env.PGHOST,
-  database: process.env.PGDATABASE,
-  password: process.env.PGPASSWORD,
-  port: process.env.PGPORT,
+  user: process.env.PGUSER || process.env.DB_USER,
+  host: process.env.PGHOST || process.env.DB_HOST,
+  database: process.env.PGDATABASE || process.env.DB_NAME,
+  password: process.env.PGPASSWORD || process.env.DB_PASSWORD,
+  port: process.env.PGPORT || process.env.DB_PORT,
 });
 
 pool.on("connect", () => console.log("Connected to PostgreSQL database"));

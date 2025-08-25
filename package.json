@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run seed && concurrently \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
+    "start": "nodemon server/index.js",
+    "dev": "node server/index.js",
     "seed": "cd server && node seed.js",
     "client": "npm run dev --prefix client",
     "server": "npm run dev --prefix server",
