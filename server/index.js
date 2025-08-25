@@ -21,7 +21,7 @@ app.use(express.json());
 // Configure CORS
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "https://dole-tupad-validator-production.up.railway.app/",
+    origin: process.env.FRONTEND_URL || "https://dole-tupad-validator.onrender.com",
     credentials: true,
   })
 );
