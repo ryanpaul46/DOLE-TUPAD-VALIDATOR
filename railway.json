@@ -5,7 +5,6 @@
   },
   "deploy": {
     "startCommand": "npm start",
-    "buildCommand": "npm run railway-build",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
