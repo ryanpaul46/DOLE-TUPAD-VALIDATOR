@@ -12,7 +12,6 @@ COPY client/ ./
 # build frontend
 RUN npm run build
 
-
 # ---------- BACKEND ----------
 FROM node:20 AS backend
 WORKDIR /app
@@ -24,11 +23,11 @@ RUN npm install
 # copy backend source
 COPY server/ ./
 
-# copy frontend build into backend public folder
-COPY --from=frontend /app/client/dist ./public
+# copy frontend build into backend folder (Express will serve from ./client/dist)
+COPY --from=frontend /app/client/dist ./client/dist
 
 # expose backend port
 EXPOSE 4000
 
 # start server
-CMD ["node", "server/index.js"]
+CMD ["node", "index.js"]
