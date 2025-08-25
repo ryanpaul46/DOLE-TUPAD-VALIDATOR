@@ -10,7 +10,7 @@
     "client": "npm run dev --prefix client",
     "server": "npm run dev --prefix server",
     "build": "cd client && npm ci && npm run build && cd ../server && npm ci",
-    "start": "cd server && npm ci && npm run start",
+    "start": "node server/index.js",
     "lint": "eslint .",
     "preview": "vite preview",
     "render-build": "cd client && npm ci && npm rebuild --platform=linux && npm run build",
