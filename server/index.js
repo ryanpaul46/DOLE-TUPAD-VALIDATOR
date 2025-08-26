@@ -33,14 +33,18 @@ pool.connect()
 // API routes
 app.use("/auth", authRouter);
 app.use("/api/users", usersRouter);
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api", uploadRoutes);
 
-// Serve frontend build in production (optional if backend serves frontend)
+// ---------- Serve frontend in production ----------
 if (process.env.NODE_ENV === "production") {
-  const clientDist = path.join(__dirname, "/client/dist");
+  // Correct path to the build folder
+  const clientDist = path.join(__dirname, "client", "dist");
+
+  // Serve static files
   app.use(express.static(clientDist));
 
+  // Fallback: all GET requests return index.html
   app.get("*", (req, res) => {
     res.sendFile(path.join(clientDist, "index.html"));
   });
