@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import logo from "../assets/dole-logo.svg";
+
 
 export default function Login() {
   const [form, setForm] = useState({ username: "", password: "", rememberMe: false });
@@ -61,7 +61,7 @@ export default function Login() {
         {/* Top Image */}
         <div className="text-center mb-3">
           <img
-            src= {logo}
+            src="/dole-logo.png"
             alt="Site Logo"
             style={{ width: "80px", height: "80px", objectFit: "cover" }}
           />
