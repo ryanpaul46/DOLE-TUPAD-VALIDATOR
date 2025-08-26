@@ -17,10 +17,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
-// CORS for deployed frontend
+// CORS for frontend (separate deployment)
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: process.env.FRONTEND_URL || "https://dole-tupad-validator-frontend.onrender.com",
     credentials: true,
   })
 );
@@ -36,12 +36,13 @@ app.use("/api/users", usersRouter);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api", uploadRoutes);
 
-// Serve React frontend in production
-if (process.env.NODE_ENV === "production") {
-  const clientDist = path.join(__dirname, "client", "dist");
-  app.use(express.static(clientDist));
-  app.get("*", (req, res) => res.sendFile(path.join(clientDist, "index.html")));
-}
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// No static frontend serving needed because frontend is separate
+// Remove the old production block that served React
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Backend running on port ${PORT}`));

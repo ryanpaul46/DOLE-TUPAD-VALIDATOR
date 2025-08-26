@@ -1,13 +1,13 @@
 import axios from "axios";
 
-// Use VITE_API_URL from environment variables
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+// Use environment variable for API URL, fallback to deployed backend
+const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dole-tupad-validator-1.onrender.com/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
-// Attach JWT token automatically
+// Attach JWT token if present
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
   if (token) config.headers.Authorization = `Bearer ${token}`;
