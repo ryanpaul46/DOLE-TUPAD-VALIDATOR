@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import api from "../api/axios";
+import logo from "../assets/dole-logo.svg";
 
 export default function Login() {
   const [form, setForm] = useState({ username: "", password: "", rememberMe: false });
@@ -23,7 +24,7 @@ export default function Login() {
 
     setLoading(true);
     try {
-      const res = await axios.post("http://localhost:4000/auth/login", {
+      const res = await api.post("/auth/login", {
         username: form.username,
         password: form.password,
       });
@@ -60,7 +61,7 @@ export default function Login() {
         {/* Top Image */}
         <div className="text-center mb-3">
           <img
-            src="./images/dole-logo.svg"
+            src= {logo}
             alt="Site Logo"
             style={{ width: "80px", height: "80px", objectFit: "cover" }}
           />
