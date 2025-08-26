@@ -20,7 +20,7 @@ const getDatabaseConfig = () => {
   return {
     host: process.env.PGHOST || 'localhost',
     port: parseInt(process.env.PGPORT) || 5432,
-    database: process.env.PGDATABASE || 'tupad_validator',
+    database: process.env.PGDATABASE || 'postgres',
     user: process.env.PGUSER || 'postgres',
     password: process.env.PGPASSWORD || '',
     
@@ -62,79 +62,110 @@ pool.on('remove', () => {
   }
 });
 
-// Initialize database tables for development
-const initializeDatabase = async () => {
+// Verify existing database tables
+const verifyDatabaseTables = async () => {
   try {
-    // Create users table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        first_name TEXT NOT NULL,
-        last_name TEXT NOT NULL,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'client',
-        created_at TIMESTAMP DEFAULT NOW()
-      );
+    // Check if required tables exist
+    const tablesCheck = await pool.query(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      AND table_name IN ('users', 'uploaded_beneficiaries')
     `);
+    
+    const existingTables = tablesCheck.rows.map(row => row.table_name);
+    
+    if (existingTables.includes('users') && existingTables.includes('uploaded_beneficiaries')) {
+      console.log('✅ Found existing database tables: users, uploaded_beneficiaries');
+      
+      // Get table info for verification
+      const userCount = await pool.query('SELECT COUNT(*) FROM users');
+      const beneficiaryCount = await pool.query('SELECT COUNT(*) FROM uploaded_beneficiaries');
+      
+      console.log(`📊 Database Status:
+        - Users: ${userCount.rows[0].count} records
+        - Beneficiaries: ${beneficiaryCount.rows[0].count} records`);
+      
+      // Create indexes if they don't exist (optimization)
+      const indexes = [
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_name ON uploaded_beneficiaries(name)',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_project_series ON uploaded_beneficiaries(project_series)',
+        'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+        'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)'
+      ];
 
-    // Create uploaded_beneficiaries table if it doesn't exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS uploaded_beneficiaries (
-        id SERIAL PRIMARY KEY,
-        project_series TEXT,
-        id_number TEXT,
-        name TEXT,
-        first_name TEXT,
-        middle_name TEXT,
-        last_name TEXT,
-        ext_name TEXT,
-        birthdate DATE,
-        barangay TEXT,
-        city_municipality TEXT,
-        province TEXT,
-        district TEXT,
-        type_of_id TEXT,
-        id_no TEXT,
-        contact_no TEXT,
-        type_of_beneficiary TEXT,
-        occupation TEXT,
-        sex TEXT,
-        civil_status TEXT,
-        age INTEGER,
-        dependent TEXT,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
-    // Create indexes for better performance (with error handling)
-    const indexes = [
-      'CREATE INDEX IF NOT EXISTS idx_beneficiaries_name ON uploaded_beneficiaries(name)',
-      'CREATE INDEX IF NOT EXISTS idx_beneficiaries_project_series ON uploaded_beneficiaries(project_series)',
-      'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
-      'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)'
-    ];
-
-    for (const indexQuery of indexes) {
-      try {
-        await pool.query(indexQuery);
-      } catch (err) {
-        // Ignore duplicate key errors for indexes
-        if (err.code !== '23505') {
-          console.warn(`⚠️ Index creation warning: ${err.message}`);
+      for (const indexQuery of indexes) {
+        try {
+          await pool.query(indexQuery);
+        } catch (err) {
+          // Ignore duplicate key errors for indexes
+          if (err.code !== '23505') {
+            console.warn(`⚠️ Index creation warning: ${err.message}`);
+          }
         }
       }
+      
+    } else {
+      console.warn('⚠️ Required tables not found. Expected: users, uploaded_beneficiaries');
+      console.log('📋 Available tables:', existingTables);
+      
+      // Create missing tables if needed
+      if (!existingTables.includes('users')) {
+        await pool.query(`
+          CREATE TABLE users (
+            id SERIAL PRIMARY KEY,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'client',
+            created_at TIMESTAMP DEFAULT NOW()
+          );
+        `);
+        console.log('✅ Created users table');
+      }
+      
+      if (!existingTables.includes('uploaded_beneficiaries')) {
+        await pool.query(`
+          CREATE TABLE uploaded_beneficiaries (
+            id SERIAL PRIMARY KEY,
+            project_series TEXT,
+            id_number TEXT,
+            name TEXT,
+            first_name TEXT,
+            middle_name TEXT,
+            last_name TEXT,
+            ext_name TEXT,
+            birthdate DATE,
+            barangay TEXT,
+            city_municipality TEXT,
+            province TEXT,
+            district TEXT,
+            type_of_id TEXT,
+            id_no TEXT,
+            contact_no TEXT,
+            type_of_beneficiary TEXT,
+            occupation TEXT,
+            sex TEXT,
+            civil_status TEXT,
+            age INTEGER,
+            dependent TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+        `);
+        console.log('✅ Created uploaded_beneficiaries table');
+      }
     }
-
+    
     if (process.env.NODE_ENV === 'development') {
-      console.log('✅ Database tables initialized successfully');
+      console.log('✅ Database verification completed');
     }
   } catch (err) {
-    console.error('❌ Database initialization error:', err.message);
+    console.error('❌ Database verification error:', err.message);
     if (process.env.DEBUG === 'true') {
-      console.error('Full initialization error:', err);
+      console.error('Full verification error:', err);
     }
   }
 };
@@ -147,7 +178,7 @@ pool.connect()
     
     if (process.env.NODE_ENV === 'development') {
       console.log(`📅 Database time: ${result.rows[0].now}`);
-      await initializeDatabase();
+      await verifyDatabaseTables();
     }
     
     client.release();

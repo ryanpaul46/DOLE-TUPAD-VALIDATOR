@@ -16,13 +16,10 @@
    ```
 
 2. **Database Setup**
-   ```bash
-   # Create PostgreSQL database
-   createdb tupad_validator
    
-   # Or using psql
-   psql -U postgres -c "CREATE DATABASE tupad_validator;"
-   ```
+   The project uses your existing `postgres` database with the existing `users` and `uploaded_beneficiaries` tables.
+   
+   No additional database creation is needed - the application will connect to your existing setup.
 
 3. **Environment Configuration**
    
@@ -97,7 +94,7 @@ After running the seed command, use these credentials:
 ```env
 PGHOST=localhost
 PGPORT=5432
-PGDATABASE=tupad_validator
+PGDATABASE=postgres
 PGUSER=postgres
 PGPASSWORD=121693
 ```
@@ -181,10 +178,11 @@ DOLE-TUPAD-VALIDATOR/
 ## Next Steps
 
 1. **Start Development**: `npm run dev`
-2. **Create Admin User**: `npm run seed:admin`
-3. **Access Application**: http://localhost:5173
-4. **Login**: Use default admin credentials
-5. **Begin Development**: Make changes and see hot reloading in action!
+2. **Access Application**: http://localhost:5173
+3. **Login**: Use your existing user credentials from the `users` table
+4. **Begin Development**: Make changes and see hot reloading in action!
+
+**Note**: The application connects to your existing `postgres` database and uses the existing `users` and `uploaded_beneficiaries` tables.
 
 ## Production Deployment
 
