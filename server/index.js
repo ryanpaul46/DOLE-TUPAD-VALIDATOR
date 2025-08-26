@@ -9,6 +9,8 @@ import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
 import uploadRoutes from "./routes/upload.js";
 
+import seedRouter from "./routes/seed.js";
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +43,7 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+app.use("/seed", seedRouter);
 // No static frontend serving needed because frontend is separate
 // Remove the old production block that served React
 
