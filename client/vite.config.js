@@ -18,6 +18,6 @@ export default defineConfig({
     },
   },
   define: {
-    'process.env': process.env, // optional, exposes env to Vite
+    "process.env.VITE_API_URL": JSON.stringify(process.env.VITE_API_URL),
   },
 });
