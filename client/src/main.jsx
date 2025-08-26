@@ -6,7 +6,7 @@ import App from "./App.jsx";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 
-// Create root and render App
+// Create root and render
 const root = createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
