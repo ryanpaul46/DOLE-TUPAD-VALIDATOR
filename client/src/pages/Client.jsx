@@ -11,7 +11,7 @@ export default function ClientDatabase() {
 
   const fetchData = async () => {
     try {
-      const res = await axios.get("http://localhost:4000/api/beneficiaries-by-project-series");
+      const res = await axios.get("/api/beneficiaries-by-project-series");
       setData(res.data.projectSeries);
       setUniqueCounts(res.data.uniqueCounts);
     } catch (err) {

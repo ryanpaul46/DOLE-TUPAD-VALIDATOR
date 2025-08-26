@@ -15,7 +15,7 @@ async function handleSubmit(e) {
 e.preventDefault();
 setError('');
 try {
-const { data } = await api.post('/auth/login', { usernameOrEmail, password });
+const { data } = await api.post('/auth/login', { username: usernameOrEmail, password });
 localStorage.setItem('token', data.token);
 if (data.user.role === 'admin') navigate('/admin');
 else navigate('/client');

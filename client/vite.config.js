@@ -6,18 +6,31 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    assetsDir: '', // ⚠️ relative asset paths for Express
+    assetsDir: '', // relative asset paths for Express
   },
   server: {
     port: 5173,
+    host: true, // Allow external connections
     proxy: {
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        secure: false,
+        ws: true,
+      },
+      '/auth': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/uploads': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
       },
     },
   },
   define: {
-    "process.env.VITE_API_URL": JSON.stringify(process.env.VITE_API_URL),
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
   },
 });

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
-import axios from "axios";
+import api from "../api/axios";
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(true); // sidebar starts collapsed
@@ -14,19 +14,19 @@ export default function AppLayout() {
     const fetchUser = async () => {
       const token = localStorage.getItem("token");
       if (!token) {
-        navigate("/"); // redirect to login if no token
+        navigate("/login"); // redirect to login if no token
         return;
       }
 
       try {
-        const res = await axios.get("http://localhost:4000/api/users/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await api.get("/api/users/me");
         setRole(res.data.role);
       } catch (err) {
         console.error("Failed to fetch user role:", err);
         localStorage.removeItem("token");
-        navigate("/"); // go back to login if token invalid
+        localStorage.removeItem("role");
+        localStorage.removeItem("username");
+        navigate("/login"); // go back to login if token invalid
       } finally {
         setLoading(false);
       }

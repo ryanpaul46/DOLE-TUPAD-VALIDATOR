@@ -2,6 +2,7 @@
 import { pool } from "../db.js";  // ✅ make sure this matches your db connection file
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { findUserByUsernameOrEmail } from "../models/userModel.js";
 
 // Login
 export const login = async (req, res) => {
@@ -11,12 +12,11 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Username and password are required" });
     }
 
-    const { rows } = await pool.query("SELECT * FROM users WHERE username=$1", [username]);
-    if (!rows.length) {
+    const user = await findUserByUsernameOrEmail(username);
+    if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const user = rows[0];
     const valid = await bcrypt.compare(password, user.password_hash); // ✅ using password_hash
     if (!valid) {
       return res.status(401).json({ message: "Invalid credentials" });
