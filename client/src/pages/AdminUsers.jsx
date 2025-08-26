@@ -43,15 +43,18 @@ export default function AdminUsers() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.get("/users", {
+      const res = await api.get("/api/users", {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
-      setUsers(res.data);
+      // Ensure the response data is an array
+      const userData = Array.isArray(res.data) ? res.data : [];
+      setUsers(userData);
     } catch (err) {
       const msg =
         err.response?.data?.message || err.message || "Failed to fetch users";
       setError(msg);
-      console.error("GET /users failed:", err);
+      setUsers([]); // Reset to empty array on error
+      console.error("GET /api/users failed:", err);
     } finally {
       setLoading(false);
     }
@@ -60,7 +63,7 @@ export default function AdminUsers() {
   const handleDelete = async (userId) => {
     if (!window.confirm("Are you sure you want to delete this user?")) return;
     try {
-      await api.delete(`/users/${userId}`, {
+      await api.delete(`/api/users/${userId}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
       setUsers((prev) => prev.filter((u) => u.id !== userId));
@@ -68,7 +71,7 @@ export default function AdminUsers() {
       const msg =
         err.response?.data?.message || err.message || "Failed to delete user";
       alert(msg);
-      console.error("DELETE /users/:id failed:", err);
+      console.error("DELETE /api/users/:id failed:", err);
     }
   };
 
@@ -82,7 +85,7 @@ export default function AdminUsers() {
     try {
       if (isEditing) {
         // update
-        const res = await api.put(`/users/${formUser.id}`, formUser, {
+        const res = await api.put(`/api/users/${formUser.id}`, formUser, {
           headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
         });
         setUsers((prev) =>
@@ -90,7 +93,7 @@ export default function AdminUsers() {
         );
       } else {
         // create
-        const res = await api.post("/users", formUser, {
+        const res = await api.post("/api/users", formUser, {
           headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
         });
         setUsers((prev) => [...prev, res.data]);
@@ -156,31 +159,39 @@ export default function AdminUsers() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>{u.id}</td>
-                <td>{u.first_name}</td>
-                <td>{u.last_name}</td>
-                <td>{u.username}</td>
-                <td>{u.email}</td>
-                <td>{u.role}</td>
-                <td>
-                  <button
-                    className="btn btn-warning btn-sm me-2"
-                    onClick={() => handleEdit(u)}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => handleDelete(u.id)}
-                  >
-                    Delete
-                  </button>
+            {Array.isArray(users) && users.length > 0 ? (
+              users.map((u) => (
+                <tr key={u.id}>
+                  <td>{u.id}</td>
+                  <td>{u.first_name}</td>
+                  <td>{u.last_name}</td>
+                  <td>{u.username}</td>
+                  <td>{u.email}</td>
+                  <td>{u.role}</td>
+                  <td>
+                    <button
+                      className="btn btn-warning btn-sm me-2"
+                      onClick={() => handleEdit(u)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => handleDelete(u.id)}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                  <td>{new Date(u.created_at).toLocaleString()}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan="8" className="text-center text-muted">
+                  No users found
                 </td>
-                <td>{new Date(u.created_at).toLocaleString()}</td>
               </tr>
-            ))}
+            )}
           </tbody>
         </Table>
       )}

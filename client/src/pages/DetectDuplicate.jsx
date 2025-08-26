@@ -25,7 +25,7 @@ export default function DetectDuplicate() {
       setError("");
       
       // Compare Excel file with database
-      const res = await api.post("/compare-excel", formData, {
+      const res = await api.post("/api/compare-excel", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       
@@ -45,7 +45,7 @@ export default function DetectDuplicate() {
     formData.append("excelFile", file);
 
     try {
-      await api.post("/upload-excel", formData, {
+      await api.post("/api/upload-excel", formData, {
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -54,7 +54,7 @@ export default function DetectDuplicate() {
       alert("File uploaded successfully!");
       setFile(null);
 
-      const res = await api.get("/uploaded-beneficiaries");
+      const res = await api.get("/api/uploaded-beneficiaries");
       setBeneficiaries(res.data);
     } catch (err) {
       console.error("Upload failed:", err);

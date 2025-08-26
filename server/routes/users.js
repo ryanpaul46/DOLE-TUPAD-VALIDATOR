@@ -24,15 +24,15 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 // GET all users
-router.get("/", getAllUsers);
+router.get("/", requireAuth, getAllUsers);
 
 // CREATE user
-router.post("/", createUser);
+router.post("/", requireAuth, createUser);
 
 // UPDATE user
-router.put("/:id", updateUser);
+router.put("/:id", requireAuth, updateUser);
 
 // DELETE user
-router.delete("/:id", deleteUser);
+router.delete("/:id", requireAuth, deleteUser);
 
 export default router;

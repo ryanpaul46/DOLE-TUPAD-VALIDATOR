@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Container, Table, Card, Row, Col } from "react-bootstrap";
-import axios from "axios";
+import api from "../api/axios";
 
 export default function ClientDatabase() {
   const [data, setData] = useState([]);
@@ -11,7 +11,7 @@ export default function ClientDatabase() {
 
   const fetchData = async () => {
     try {
-      const res = await axios.get("/api/beneficiaries-by-project-series");
+      const res = await api.get("/api/beneficiaries-by-project-series");
       setData(res.data.projectSeries);
       setUniqueCounts(res.data.uniqueCounts);
     } catch (err) {

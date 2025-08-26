@@ -24,11 +24,11 @@ export default function Database() {
       setError("");
       
       // Fetch column information
-      const columnsRes = await api.get("/uploaded-columns");
+      const columnsRes = await api.get("/api/uploaded-columns");
       setColumns(columnsRes.data.filter(col => col.column_name !== 'id')); // Exclude ID column
       
       // Fetch data
-      const dataRes = await api.get("/uploaded-beneficiaries");
+      const dataRes = await api.get("/api/uploaded-beneficiaries");
       setData(dataRes.data);
     } catch (err) {
       console.error("Failed fetching data:", err);
@@ -54,7 +54,7 @@ export default function Database() {
 
     try {
       setLoading(true);
-      await api.post("/upload-excel", formData, {
+      await api.post("/api/upload-excel", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       
@@ -75,7 +75,7 @@ export default function Database() {
     
     try {
       setLoading(true);
-      await api.delete("/uploaded-beneficiaries");
+      await api.delete("/api/uploaded-beneficiaries");
       setData([]);
     } catch (err) {
       console.error("Failed to clear data:", err);
