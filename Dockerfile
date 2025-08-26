@@ -2,35 +2,30 @@
 FROM node:20 AS frontend
 WORKDIR /app/client
 
-# Copy package.json and package-lock.json and install dependencies (cache layer)
+# Copy frontend dependencies and install
 COPY client/package*.json ./
 RUN npm install
 
-# Copy frontend source
+# Copy frontend source and build
 COPY client/ ./
-
-# Build frontend
 RUN npm run build
 
 # ---------- BACKEND ----------
 FROM node:20 AS backend
 WORKDIR /app
 
-# Copy package.json and package-lock.json and install dependencies (cache layer)
+# Copy backend dependencies and install (production only)
 COPY server/package*.json ./
 RUN npm install --production
 
 # Copy backend source
 COPY server/ ./
 
-# Copy frontend build from previous stage
+# Copy frontend build into backend folder
 COPY --from=frontend /app/client/dist ./client/dist
 
 # Expose backend port
 EXPOSE 4000
 
-# Use environment variables set in Render dashboard (no secrets in Dockerfile)
-# Example: DATABASE_URL, FRONTEND_URL, JWT_SECRET, PORT
-
-# Start backend
+# Start backend server
 CMD ["node", "index.js"]

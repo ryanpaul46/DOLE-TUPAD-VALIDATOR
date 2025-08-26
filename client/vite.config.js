@@ -3,6 +3,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    assetsDir: '', // ⚠️ relative asset paths for Express
+  },
   server: {
     port: 5173,
     proxy: {
@@ -11,11 +16,6 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-  },
-  build: {
-    outDir: 'dist',     // default build output
-    emptyOutDir: true,  // clear old builds
-    assetsDir: '',      // crucial: makes asset paths relative for Express
   },
   define: {
     'process.env': process.env, // optional, exposes env to Vite

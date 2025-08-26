@@ -17,7 +17,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json());
 
-// CORS configured for deployed frontend
+// CORS for deployed frontend
 app.use(
   cors({
     origin: process.env.FRONTEND_URL,
@@ -25,7 +25,7 @@ app.use(
   })
 );
 
-// Test PostgreSQL connection at startup
+// Test PostgreSQL connection
 pool.connect()
   .then(() => console.log("✅ Connected to PostgreSQL database"))
   .catch(err => console.error("❌ Database connection error:", err));
@@ -36,18 +36,11 @@ app.use("/api/users", usersRouter);
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/api", uploadRoutes);
 
-// ---------- Serve frontend in production ----------
+// Serve React frontend in production
 if (process.env.NODE_ENV === "production") {
-  // Correct path to the build folder
   const clientDist = path.join(__dirname, "client", "dist");
-
-  // Serve static files
   app.use(express.static(clientDist));
-
-  // Fallback: all GET requests return index.html
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(clientDist, "index.html"));
-  });
+  app.get("*", (req, res) => res.sendFile(path.join(clientDist, "index.html")));
 }
 
 const PORT = process.env.PORT || 4000;
