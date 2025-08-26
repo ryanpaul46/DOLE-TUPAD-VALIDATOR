@@ -12,6 +12,11 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    outDir: 'dist',     // default build output
+    emptyOutDir: true,  // clear old builds
+    assetsDir: '',      // crucial: makes asset paths relative for Express
+  },
   define: {
     'process.env': process.env, // optional, exposes env to Vite
   },
