@@ -3,8 +3,11 @@ import multer from "multer";
 import path from "path";
 import XLSX from "xlsx";
 import { pool } from "../db.js";
+import { OptimizedUploadService } from "../services/optimizedUploadService.js";
+import cacheService from "../services/cacheService.js";
 
 const router = express.Router();
+const optimizedService = new OptimizedUploadService();
 
 // Multer storage with absolute path
 const storage = multer.diskStorage({
@@ -82,6 +85,10 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
       );
     }
 
+    // Clear cache after successful upload since database has changed
+    await cacheService.clearAll();
+    console.log('🧹 Cache cleared after data upload');
+
     res.json({ message: "Excel data imported successfully", rowsInserted: data.length });
   } catch (err) {
     console.error("Upload error:", err);
@@ -99,68 +106,119 @@ router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
-    // Fetch existing data from database with names
-    const dbResult = await pool.query("SELECT * FROM uploaded_beneficiaries WHERE name IS NOT NULL");
-    const dbData = dbResult.rows;
+    // For small files (< 5000 rows), use original method
+    if (excelData.length < 5000) {
+      // Fetch existing data from database with ALL fields for complete comparison
+      const dbResult = await pool.query(`
+        SELECT * FROM uploaded_beneficiaries
+        WHERE name IS NOT NULL AND name != ''
+        ORDER BY name
+      `);
+      const dbData = dbResult.rows;
 
-    // Create a map of database records by name for quick lookup
-    const dbRecordMap = new Map();
-    dbData.forEach(record => {
-      if (record.name) {
-        dbRecordMap.set(record.name, record);
-      }
-    });
+      // Create a map of database records by name for quick lookup
+      // Clean up empty strings from database records
+      const dbRecordMap = new Map();
+      dbData.forEach(record => {
+        if (record.name) {
+          // Clean up the database record by removing empty strings
+          const cleanedRecord = {};
+          Object.keys(record).forEach(key => {
+            const value = record[key];
+            // Keep null, keep actual values, remove empty strings
+            if (value === null || value === undefined || value === '') {
+              cleanedRecord[key] = null; // Convert empty strings to null for consistency
+            } else if (typeof value === 'string' && value.trim() === '') {
+              cleanedRecord[key] = null; // Convert whitespace-only strings to null
+            } else {
+              cleanedRecord[key] = value; // Keep actual values
+            }
+          });
+          dbRecordMap.set(record.name, cleanedRecord);
+        }
+      });
 
-    // Identify duplicates and originals
-    const duplicates = [];
-    const originals = [];
+      // Identify duplicates and originals
+      const duplicates = [];
+      const originals = [];
 
-    excelData.forEach((row, index) => {
-      // Create concatenated name from Excel data components
-      const excelNameParts = [
-        row["First Name"]?.toString().trim(),
-        row["Middle Name"]?.toString().trim(),
-        row["Last Name"]?.toString().trim(),
-        row["Ext. Name"]?.toString().trim()
-      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
-      
-      const concatenatedName = excelNameParts.join(' ');
-      
-      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
-      const nameToCompare = (row["Name"]?.toString().trim() &&
-                           row["Name"].toString().trim() !== 'null' &&
-                           row["Name"].toString().trim() !== 'undefined')
-                          ? row["Name"].toString().trim()
-                          : concatenatedName;
-      
-      if (nameToCompare) {
-        if (dbRecordMap.has(nameToCompare)) {
-          duplicates.push({
-            excel_row: {
+      excelData.forEach((row, index) => {
+        // Create concatenated name from Excel data components
+        const excelNameParts = [
+          row["First Name"]?.toString().trim(),
+          row["Middle Name"]?.toString().trim(),
+          row["Last Name"]?.toString().trim(),
+          row["Ext. Name"]?.toString().trim()
+        ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+        
+        const concatenatedName = excelNameParts.join(' ');
+        
+        // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+        const nameToCompare = (row["Name"]?.toString().trim() &&
+                             row["Name"].toString().trim() !== 'null' &&
+                             row["Name"].toString().trim() !== 'undefined')
+                            ? row["Name"].toString().trim()
+                            : concatenatedName;
+        
+        if (nameToCompare) {
+          if (dbRecordMap.has(nameToCompare)) {
+            duplicates.push({
+              excel_row: {
+                row_number: index + 2, // +2 because of header row and 0-based index
+                data: row
+              },
+              database_record: dbRecordMap.get(nameToCompare)
+            });
+          } else {
+            originals.push({
               row_number: index + 2, // +2 because of header row and 0-based index
               data: row
-            },
-            database_record: dbRecordMap.get(nameToCompare)
-          });
-        } else {
-          originals.push({
-            row_number: index + 2, // +2 because of header row and 0-based index
-            data: row
-          });
+            });
+          }
         }
-      }
-    });
+      });
 
-    res.json({
-      duplicates,
-      originals,
-      totalExcelRows: excelData.length,
-      totalDuplicates: duplicates.length,
-      totalOriginals: originals.length
-    });
+      res.json({
+        duplicates,
+        originals,
+        totalExcelRows: excelData.length,
+        totalDuplicates: duplicates.length,
+        totalOriginals: originals.length
+      });
+    } else {
+      // For large files, redirect to optimized processing
+      res.json({
+        message: "Large file detected. Please use the optimized comparison endpoint.",
+        shouldUseOptimized: true,
+        fileSize: excelData.length
+      });
+    }
   } catch (err) {
     console.error("Compare error:", err);
     res.status(500).json({ message: "File comparison failed", error: err.message });
+  }
+});
+
+// Optimized compare Excel endpoint for large files
+router.post("/compare-excel-optimized", upload.single("excelFile"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    console.log('🚀 Starting optimized comparison for large file...');
+    
+    // Use optimized service for chunked processing
+    const result = await optimizedService.processExcelInChunks(
+      req.file.path,
+      (progress) => {
+        // Progress callback - could be sent via WebSocket in the future
+        console.log(`Progress: ${progress.percentage}% - ${progress.processed}/${progress.total} rows processed`);
+      }
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error("Optimized compare error:", err);
+    res.status(500).json({ message: "Optimized comparison failed", error: err.message });
   }
 });
 
@@ -194,6 +252,7 @@ router.get("/uploaded-columns", async (req, res) => {
 router.delete("/uploaded-beneficiaries", async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries"); // Deletes all rows
+    await cacheService.clearAll(); // Clear cache after database clear
     res.json({ message: "All uploaded data cleared successfully." });
   } catch (err) {
     console.error("Failed to clear data:", err);
@@ -204,10 +263,32 @@ router.delete("/uploaded-beneficiaries", async (req, res) => {
 router.delete("/uploaded-clear", async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries");
+    await cacheService.clearAll(); // Clear cache after database clear
     res.json({ message: "Database cleared successfully" });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Failed to clear database" });
+  }
+});
+
+// Cache management endpoint
+router.get("/cache-stats", async (req, res) => {
+  try {
+    const stats = await cacheService.getStats();
+    res.json(stats);
+  } catch (err) {
+    console.error("Cache stats error:", err);
+    res.status(500).json({ message: "Failed to get cache stats", error: err.message });
+  }
+});
+
+router.delete("/clear-cache", async (req, res) => {
+  try {
+    await cacheService.clearAll();
+    res.json({ message: "Cache cleared successfully" });
+  } catch (err) {
+    console.error("Cache clear error:", err);
+    res.status(500).json({ message: "Failed to clear cache", error: err.message });
   }
 });
 
@@ -256,14 +337,28 @@ router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, r
     const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
     // Fetch existing data from database with names
-    const dbResult = await pool.query("SELECT * FROM uploaded_beneficiaries WHERE name IS NOT NULL");
+    const dbResult = await pool.query("SELECT * FROM uploaded_beneficiaries WHERE name IS NOT NULL AND name != ''");
     const dbData = dbResult.rows;
 
     // Create a map of database records by name for quick lookup
+    // Clean up empty strings from database records
     const dbRecordMap = new Map();
     dbData.forEach(record => {
       if (record.name) {
-        dbRecordMap.set(record.name, record);
+        // Clean up the database record by removing empty strings
+        const cleanedRecord = {};
+        Object.keys(record).forEach(key => {
+          const value = record[key];
+          // Keep null, keep actual values, remove empty strings
+          if (value === null || value === undefined || value === '') {
+            cleanedRecord[key] = null; // Convert empty strings to null for consistency
+          } else if (typeof value === 'string' && value.trim() === '') {
+            cleanedRecord[key] = null; // Convert whitespace-only strings to null
+          } else {
+            cleanedRecord[key] = value; // Keep actual values
+          }
+        });
+        dbRecordMap.set(record.name, cleanedRecord);
       }
     });
 

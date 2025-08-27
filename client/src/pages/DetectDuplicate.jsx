@@ -1,8 +1,10 @@
 import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col } from "react-bootstrap";
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Download } from "react-bootstrap-icons";
 import * as XLSX from "xlsx";
 import api from "../api/axios";
+import VirtualizedTable from "../components/VirtualizedTable";
+import ProgressTracker from "../components/ProgressTracker";
 
 export default function DetectDuplicate() {
   const [file, setFile] = useState(null);
@@ -10,6 +12,14 @@ export default function DetectDuplicate() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [compareResult, setCompareResult] = useState(null);
+  const [useOptimized, setUseOptimized] = useState(false);
+  const [progress, setProgress] = useState({
+    status: 'idle',
+    processed: 0,
+    total: 0,
+    duplicatesFound: 0,
+    percentage: 0
+  });
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
 
@@ -57,16 +67,62 @@ export default function DetectDuplicate() {
     try {
       setLoading(true);
       setError("");
+      setProgress({
+        status: 'processing',
+        processed: 0,
+        total: 0,
+        duplicatesFound: 0,
+        percentage: 0
+      });
       
-      // Compare Excel file with database
+      // First try regular comparison
       const res = await api.post("/api/compare-excel", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       
-      setCompareResult(res.data);
+      // Check if we need to use optimized processing
+      if (res.data.shouldUseOptimized) {
+        console.log(`Large file detected (${res.data.fileSize} rows). Switching to optimized processing...`);
+        setUseOptimized(true);
+        
+        // Update progress for large file processing
+        setProgress(prev => ({
+          ...prev,
+          total: res.data.fileSize,
+          status: 'processing'
+        }));
+        
+        // Use optimized endpoint for large files
+        const optimizedRes = await api.post("/api/compare-excel-optimized", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        
+        setCompareResult(optimizedRes.data);
+        setProgress({
+          status: 'completed',
+          processed: optimizedRes.data.totalExcelRows,
+          total: optimizedRes.data.totalExcelRows,
+          duplicatesFound: optimizedRes.data.totalDuplicates,
+          percentage: 100
+        });
+      } else {
+        // Regular processing for small files
+        setCompareResult(res.data);
+        setProgress({
+          status: 'completed',
+          processed: res.data.totalExcelRows,
+          total: res.data.totalExcelRows,
+          duplicatesFound: res.data.totalDuplicates,
+          percentage: 100
+        });
+      }
     } catch (err) {
       console.error("Compare failed:", err);
       setError("Comparison failed. Please try again.");
+      setProgress(prev => ({
+        ...prev,
+        status: 'error'
+      }));
     } finally {
       setLoading(false);
     }
@@ -100,6 +156,14 @@ export default function DetectDuplicate() {
     setFile(null);
     setCompareResult(null);
     setError("");
+    setUseOptimized(false);
+    setProgress({
+      status: 'idle',
+      processed: 0,
+      total: 0,
+      duplicatesFound: 0,
+      percentage: 0
+    });
   };
 
   // Define uniform headers for comparison tables
@@ -168,6 +232,8 @@ export default function DetectDuplicate() {
 
   // Get value from record using uniform header mapping
   const getUniformValue = (record, header, isExcelData = false) => {
+    if (!record || !header) return '';
+    
     const key = isExcelData ? header.excelKey : header.dbKey;
     let value = record[key];
     
@@ -203,7 +269,12 @@ export default function DetectDuplicate() {
       }
     }
     
-    return value !== undefined && value !== null ? String(value) : '';
+    // Return empty string for null/undefined, but preserve other falsy values like 0
+    if (value === null || value === undefined) {
+      return '';
+    }
+    
+    return String(value);
   };
 
   // Check if Excel data should show concatenated indicator
@@ -269,6 +340,91 @@ export default function DetectDuplicate() {
     XLSX.writeFile(workbook, filename);
   };
 
+  // Prepare data for virtualized duplicate comparison table
+  const duplicateTableData = useMemo(() => {
+    if (!compareResult || !compareResult.duplicates) return [];
+    
+    const data = [];
+    compareResult.duplicates.forEach((dup, idx) => {
+      // Database record - store original data separately to avoid conflicts
+      data.push({
+        _source: 'Database',
+        _index: idx * 2,
+        _originalData: dup.database_record,
+        _pairedData: dup.excel_row.data,
+        _isExcel: false
+      });
+      
+      // Excel record - store original data separately to avoid conflicts
+      data.push({
+        _source: 'Excel',
+        _index: idx * 2 + 1,
+        _originalData: dup.excel_row.data,
+        _pairedData: dup.database_record,
+        _isExcel: true
+      });
+    });
+    return data;
+  }, [compareResult]);
+
+  // Headers for virtualized duplicate table with improved widths
+  const duplicateTableHeaders = useMemo(() => {
+    const availableHeaders = getAvailableHeaders();
+    return [
+      { key: '_source', label: 'Source', width: 120 },
+      ...availableHeaders.map(header => ({
+        ...header,
+        width: header.key === 'name' ? 250 :
+               header.key === 'first_name' || header.key === 'last_name' ? 180 :
+               header.key === 'project_series' || header.key === 'id_number' ? 160 :
+               header.key === 'barangay' || header.key === 'city_municipality' || header.key === 'province' ? 180 :
+               130
+      }))
+    ];
+  }, [compareResult]);
+
+  // Custom cell renderer for duplicate table
+  const renderDuplicateCell = useCallback((rowData, header, rowIndex, cellIndex) => {
+    if (!rowData || !header) {
+      return <span className="text-muted">-</span>;
+    }
+
+    if (header.key === '_source') {
+      return (
+        <span className={`fw-bold ${rowData._source === 'Database' ? 'text-info' : 'text-warning'}`}>
+          {rowData._source || 'Unknown'}
+        </span>
+      );
+    }
+    
+    // Get the value from the appropriate data source
+    const currentValue = getUniformValue(rowData._originalData || {}, header, rowData._isExcel);
+    const pairedValue = getUniformValue(rowData._pairedData || {}, header, !rowData._isExcel);
+    
+    // Check if values are different
+    const isDiff = isDifferent(currentValue, pairedValue);
+    
+    // Handle display of values - server now returns cleaned data with empty strings converted to null
+    let displayValue = currentValue;
+    
+    // Only show "-" for null/undefined values (server converts empty strings to null)
+    if (displayValue === null || displayValue === undefined) {
+      return <span className="text-muted">-</span>;
+    }
+    
+    // Convert to string for display
+    const finalDisplayValue = String(displayValue);
+    
+    return (
+      <span
+        className={isDiff ? (rowData._source === 'Database' ? 'fw-bold text-warning' : 'fw-bold text-danger') : ''}
+        title={finalDisplayValue}
+      >
+        {finalDisplayValue}
+      </span>
+    );
+  }, [getUniformValue, isDifferent]);
+
   return (
     <Container fluid className="p-4 flex-grow-1">
       <h2>Detect Duplicate Names</h2>
@@ -289,13 +445,7 @@ export default function DetectDuplicate() {
             >
               {loading ? <Spinner size="sm" animation="border" /> : "Detect Duplicates"}
             </Button>
-            <Button 
-              onClick={handleUpload} 
-              disabled={loading || !file}
-              variant="secondary"
-            >
-              Upload to Database
-            </Button>
+          
             <Button 
               onClick={handleClear} 
               variant="outline-secondary"
@@ -306,8 +456,20 @@ export default function DetectDuplicate() {
         </Card.Body>
       </Card>
 
+      {/* Progress Tracker */}
+      {(loading || progress.status !== 'idle') && (
+        <ProgressTracker
+          progress={progress.percentage}
+          total={progress.total}
+          processed={progress.processed}
+          duplicatesFound={progress.duplicatesFound}
+          status={progress.status}
+          showDetails={true}
+        />
+      )}
+
       {/* Loading / Error */}
-      {loading && (
+      {loading && !progress.total && (
         <div className="d-flex justify-content-center my-4">
           <Spinner animation="border" />
         </div>
@@ -331,7 +493,7 @@ export default function DetectDuplicate() {
           {compareResult.duplicates.length > 0 && (
             <Card className="mb-4">
               <Card.Header className="text-danger d-flex justify-content-between align-items-center">
-                <span>Duplicate Rows Comparison</span>
+                <span>Duplicate Rows Comparison ({compareResult.duplicates.length} duplicates found)</span>
                 <Button
                   variant="outline-success"
                   size="sm"
@@ -343,68 +505,14 @@ export default function DetectDuplicate() {
                 </Button>
               </Card.Header>
               <Card.Body className="p-0">
-                <div className="table-container" style={{ maxHeight: "60vh", overflow: "auto" }}>
-                  <Table striped bordered hover size="sm" className="mb-0">
-                    <thead className="position-sticky top-0 bg-light">
-                      <tr>
-                        <th>Source</th>
-                        {getAvailableHeaders().map((header, idx) => (
-                          <th key={idx}>{header.label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {compareResult.duplicates.map((dup, idx) => (
-                        <>
-                          {/* Database Row */}
-                          <tr className="table-info">
-                            <td><strong>Database</strong></td>
-                            {getAvailableHeaders().map((header, colIdx) => {
-                              const dbValue = getUniformValue(dup.database_record, header, false);
-                              const excelValue = getUniformValue(dup.excel_row.data, header, true);
-                              const isDiff = isDifferent(dbValue, excelValue);
-                              
-                              let displayValue = dbValue;
-                              
-                              return (
-                                <td
-                                  key={`db-${idx}-${colIdx}`}
-                                  className={isDiff ? "table-warning fw-bold" : ""}
-                                >
-                                  {displayValue}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          {/* Excel Row */}
-                          <tr className="table-warning">
-                            <td><strong>Excel</strong></td>
-                            {getAvailableHeaders().map((header, colIdx) => {
-                              const dbValue = getUniformValue(dup.database_record, header, false);
-                              const excelValue = getUniformValue(dup.excel_row.data, header, true);
-                              const isDiff = isDifferent(dbValue, excelValue);
-                              
-                              let displayValue = excelValue;
-                              
-                              return (
-                                <td
-                                  key={`excel-${idx}-${colIdx}`}
-                                  className={isDiff ? "table-danger fw-bold" : ""}
-                                >
-                                  {displayValue}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          {/* Empty row for spacing */}
-                          <tr>
-                            <td colSpan={getAvailableHeaders().length + 1} className="p-1"></td>
-                          </tr>
-                        </>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
+                <VirtualizedTable
+                  data={duplicateTableData}
+                  headers={duplicateTableHeaders}
+                  height={500}
+                  rowHeight={50}
+                  renderCell={renderDuplicateCell}
+                  className="border-0"
+                />
               </Card.Body>
             </Card>
           )}
@@ -412,36 +520,31 @@ export default function DetectDuplicate() {
           {/* Original Rows */}
           {compareResult.originals.length > 0 && (
             <Card className="mb-4">
-              <Card.Header className="text-success">Original Rows (Not in Database)</Card.Header>
+              <Card.Header className="text-success">Original Rows (Not in Database) - {compareResult.originals.length} records</Card.Header>
               <Card.Body className="p-0">
-                <div className="table-container" style={{ maxHeight: "40vh", overflow: "auto" }}>
-                  <Table striped bordered hover size="sm" className="mb-0">
-                    <thead className="position-sticky top-0 bg-light">
-                      <tr>
-                        <th>Row #</th>
-                        {getAvailableHeaders().map((header, idx) => (
-                          <th key={idx}>{header.label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {compareResult.originals.map((row, idx) => (
-                        <tr key={idx} className="table-success">
-                          <td>{row.row_number}</td>
-                          {getAvailableHeaders().map((header, colIdx) => {
-                            const value = getUniformValue(row.data, header, true);
-                            
-                            return (
-                              <td key={colIdx}>
-                                {value}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
+                <VirtualizedTable
+                  data={compareResult.originals.map(row => ({
+                    ...row.data,
+                    _row_number: row.row_number
+                  }))}
+                  headers={[
+                    { key: '_row_number', label: 'Row #', width: 80 },
+                    ...getAvailableHeaders().map(header => ({
+                      ...header,
+                      width: header.key === 'name' ? 200 : 150
+                    }))
+                  ]}
+                  height={400}
+                  rowHeight={45}
+                  renderCell={(rowData, header, rowIndex, cellIndex) => {
+                    if (header.key === '_row_number') {
+                      return <span className="fw-bold text-success">{rowData._row_number}</span>;
+                    }
+                    const value = getUniformValue(rowData, header, true);
+                    return <span title={value}>{value}</span>;
+                  }}
+                  className="border-0"
+                />
               </Card.Body>
             </Card>
           )}
@@ -451,40 +554,31 @@ export default function DetectDuplicate() {
       {/* Uploaded Data */}
       {beneficiaries.length > 0 && (
         <Card>
-          <Card.Header>Uploaded Data</Card.Header>
+          <Card.Header>Uploaded Data - {beneficiaries.length} records</Card.Header>
           <Card.Body className="p-0">
-            <div className="table-container" style={{ maxHeight: "40vh", overflow: "auto" }}>
-              <Table striped bordered hover size="sm" className="mb-0">
-                <thead>
-                  <tr>
-                    <th>Project Series</th>
-                    <th>ID Number</th>
-                    <th>Name</th>
-                    <th>First Name</th>
-                    <th>Last Name</th>
-                    <th>Barangay</th>
-                    <th>City</th>
-                    <th>Province</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {beneficiaries.map((b) => (
-                    <tr key={b.id}>
-                      <td>{b.project_series}</td>
-                      <td>{b.id_number}</td>
-                      <td>
-                        {getDisplayName(b)}
-                      </td>
-                      <td>{b.first_name}</td>
-                      <td>{b.last_name}</td>
-                      <td>{b.barangay}</td>
-                      <td>{b.city_municipality}</td>
-                      <td>{b.province}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
-            </div>
+            <VirtualizedTable
+              data={beneficiaries}
+              headers={[
+                { key: 'project_series', label: 'Project Series', width: 150 },
+                { key: 'id_number', label: 'ID Number', width: 120 },
+                { key: 'name', label: 'Name', width: 200 },
+                { key: 'first_name', label: 'First Name', width: 150 },
+                { key: 'last_name', label: 'Last Name', width: 150 },
+                { key: 'barangay', label: 'Barangay', width: 150 },
+                { key: 'city_municipality', label: 'City', width: 150 },
+                { key: 'province', label: 'Province', width: 150 }
+              ]}
+              height={400}
+              rowHeight={45}
+              renderCell={(rowData, header, rowIndex, cellIndex) => {
+                if (header.key === 'name') {
+                  return <span title={getDisplayName(rowData)}>{getDisplayName(rowData)}</span>;
+                }
+                const value = rowData[header.key] || '';
+                return <span title={value}>{value}</span>;
+              }}
+              className="border-0"
+            />
           </Card.Body>
         </Card>
       )}

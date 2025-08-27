@@ -47,6 +47,8 @@ export default function Login() {
           <img src="/dole-logo.svg" alt="Site Logo" style={{ width: "80px", height: "80px", objectFit: "cover" }} />
         </div>
         <h3 className="text-center mb-4">DOLE-TUPAD Validator</h3>
+        <p className="tagline text-center">“Your easy way to check TUPAD records.”</p>
+        <h1 className="h5 text-center mb-4">Login to your account</h1>
 
         <form onSubmit={handleSubmit}>
           <div className="mb-3">

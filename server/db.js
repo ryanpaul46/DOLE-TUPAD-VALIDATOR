@@ -24,11 +24,16 @@ const getDatabaseConfig = () => {
     user: process.env.PGUSER || 'postgres',
     password: process.env.PGPASSWORD || '',
     
-    // Connection pool settings for development
-    min: parseInt(process.env.DB_POOL_MIN) || 2,
-    max: parseInt(process.env.DB_POOL_MAX) || 10,
-    idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT) || 30000,
-    connectionTimeoutMillis: 5000,
+    // Enhanced connection pool settings for large data processing
+    min: parseInt(process.env.DB_POOL_MIN) || 5,  // Increased minimum connections
+    max: parseInt(process.env.DB_POOL_MAX) || 25, // Increased maximum connections
+    idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT) || 60000,
+    connectionTimeoutMillis: 15000, // Increased timeout for large queries
+    acquireTimeoutMillis: 60000,    // Time to wait for connection from pool
+    
+    // Query optimization settings
+    statement_timeout: 120000,      // 2 minutes for complex queries
+    query_timeout: 120000,
     
     // Development specific settings
     ssl: false, // Disable SSL for local development
@@ -86,24 +91,43 @@ const verifyDatabaseTables = async () => {
         - Users: ${userCount.rows[0].count} records
         - Beneficiaries: ${beneficiaryCount.rows[0].count} records`);
       
-      // Create indexes if they don't exist (optimization)
+      // Create enhanced indexes for performance optimization
       const indexes = [
+        // Basic indexes
         'CREATE INDEX IF NOT EXISTS idx_beneficiaries_name ON uploaded_beneficiaries(name)',
         'CREATE INDEX IF NOT EXISTS idx_beneficiaries_project_series ON uploaded_beneficiaries(project_series)',
         'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
-        'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)'
+        'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+        
+        // Enhanced indexes for duplicate detection
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_name_lower ON uploaded_beneficiaries(LOWER(TRIM(name))) WHERE name IS NOT NULL',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_composite ON uploaded_beneficiaries(name, id_number, project_series) WHERE name IS NOT NULL',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_name_partial ON uploaded_beneficiaries(name) WHERE name IS NOT NULL AND name != \'\'',
+        
+        // Indexes for common query patterns
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_id_number ON uploaded_beneficiaries(id_number) WHERE id_number IS NOT NULL',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_location ON uploaded_beneficiaries(province, city_municipality, barangay)',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_created_at ON uploaded_beneficiaries(created_at)',
+        
+        // Performance indexes for statistics queries
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_sex ON uploaded_beneficiaries(sex) WHERE sex IS NOT NULL',
+        'CREATE INDEX IF NOT EXISTS idx_beneficiaries_age ON uploaded_beneficiaries(age) WHERE age IS NOT NULL'
       ];
 
+      console.log('🔧 Creating database indexes for performance optimization...');
+      
       for (const indexQuery of indexes) {
         try {
           await pool.query(indexQuery);
         } catch (err) {
-          // Ignore duplicate key errors for indexes
-          if (err.code !== '23505') {
+          // Ignore duplicate key errors for indexes and already exists errors
+          if (err.code !== '23505' && !err.message.includes('already exists')) {
             console.warn(`⚠️ Index creation warning: ${err.message}`);
           }
         }
       }
+      
+      console.log('✅ Database indexes created successfully');
       
     } else {
       console.warn('⚠️ Required tables not found. Expected: users, uploaded_beneficiaries');
