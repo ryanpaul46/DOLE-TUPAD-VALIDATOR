@@ -376,7 +376,7 @@ export default function DetectDuplicate() {
         ...header,
         width: header.key === 'name' ? 250 :
                header.key === 'first_name' || header.key === 'last_name' ? 180 :
-               header.key === 'project_series' || header.key === 'id_number' ? 160 :
+               header.key === 'project_series' || header.key === 'id_number' ? 250 :
                header.key === 'barangay' || header.key === 'city_municipality' || header.key === 'province' ? 180 :
                130
       }))
