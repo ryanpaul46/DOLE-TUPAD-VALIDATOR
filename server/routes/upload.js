@@ -29,6 +29,23 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
 
     // Clear existing table if needed or insert rows
     for (let row of data) {
+      // Create concatenated name from individual components
+      const nameParts = [
+        row["First Name"]?.toString().trim(),
+        row["Middle Name"]?.toString().trim(),
+        row["Last Name"]?.toString().trim(),
+        row["Ext. Name"]?.toString().trim()
+      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+      
+      const concatenatedName = nameParts.join(' ');
+      
+      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+      const finalName = (row["Name"]?.toString().trim() &&
+                        row["Name"].toString().trim() !== 'null' &&
+                        row["Name"].toString().trim() !== 'undefined')
+                       ? row["Name"].toString().trim()
+                       : concatenatedName;
+
       await pool.query(
         `INSERT INTO uploaded_beneficiaries (
           project_series, id_number, name, first_name, middle_name, last_name, ext_name,
@@ -42,7 +59,7 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
         [
           row["Project Series"],
           row["ID Number"],
-          row["Name"],
+          finalName, // Use concatenated or existing name
           row["First Name"],
           row["Middle Name"],
           row["Last Name"],
@@ -99,15 +116,31 @@ router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
     const originals = [];
 
     excelData.forEach((row, index) => {
-      const name = row["name"]; // Column 3 is the Names Header
-      if (name) {
-        if (dbRecordMap.has(name)) {
+      // Create concatenated name from Excel data components
+      const excelNameParts = [
+        row["First Name"]?.toString().trim(),
+        row["Middle Name"]?.toString().trim(),
+        row["Last Name"]?.toString().trim(),
+        row["Ext. Name"]?.toString().trim()
+      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+      
+      const concatenatedName = excelNameParts.join(' ');
+      
+      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+      const nameToCompare = (row["Name"]?.toString().trim() &&
+                           row["Name"].toString().trim() !== 'null' &&
+                           row["Name"].toString().trim() !== 'undefined')
+                          ? row["Name"].toString().trim()
+                          : concatenatedName;
+      
+      if (nameToCompare) {
+        if (dbRecordMap.has(nameToCompare)) {
           duplicates.push({
             excel_row: {
               row_number: index + 2, // +2 because of header row and 0-based index
               data: row
             },
-            database_record: dbRecordMap.get(name)
+            database_record: dbRecordMap.get(nameToCompare)
           });
         } else {
           originals.push({
@@ -210,6 +243,258 @@ router.get("/beneficiaries-by-project-series", async (req, res) => {
   } catch (err) {
     console.error("Fetch error:", err);
     res.status(500).json({ message: "Failed to fetch project series data", error: err.message });
+  }
+});
+
+// Upload Excel with duplicate scanning (Admin feature)
+router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+    // Fetch existing data from database with names
+    const dbResult = await pool.query("SELECT * FROM uploaded_beneficiaries WHERE name IS NOT NULL");
+    const dbData = dbResult.rows;
+
+    // Create a map of database records by name for quick lookup
+    const dbRecordMap = new Map();
+    dbData.forEach(record => {
+      if (record.name) {
+        dbRecordMap.set(record.name, record);
+      }
+    });
+
+    // Process Excel data and identify duplicates and new records
+    const duplicates = [];
+    const newRecords = [];
+
+    excelData.forEach((row, index) => {
+      // Create concatenated name from individual components
+      const nameParts = [
+        row["First Name"]?.toString().trim(),
+        row["Middle Name"]?.toString().trim(),
+        row["Last Name"]?.toString().trim(),
+        row["Ext. Name"]?.toString().trim()
+      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+      
+      const concatenatedName = nameParts.join(' ');
+      
+      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+      const finalName = (row["Name"]?.toString().trim() &&
+                        row["Name"].toString().trim() !== 'null' &&
+                        row["Name"].toString().trim() !== 'undefined')
+                       ? row["Name"].toString().trim()
+                       : concatenatedName;
+
+      const processedRow = { ...row, finalName, row_number: index + 2 };
+
+      if (finalName && dbRecordMap.has(finalName)) {
+        duplicates.push({
+          excel_row: processedRow,
+          database_record: dbRecordMap.get(finalName)
+        });
+      } else if (finalName) {
+        newRecords.push(processedRow);
+      }
+    });
+
+    // Return scan results without uploading
+    res.json({
+      scanResults: {
+        totalRows: excelData.length,
+        duplicatesFound: duplicates.length,
+        newRecordsFound: newRecords.length,
+        duplicates: duplicates,
+        newRecords: newRecords
+      }
+    });
+
+  } catch (err) {
+    console.error("Scan error:", err);
+    res.status(500).json({ message: "File scan failed", error: err.message });
+  }
+});
+
+// Upload only new records after scan confirmation
+router.post("/upload-new-records", async (req, res) => {
+  try {
+    const { newRecords } = req.body;
+    
+    if (!newRecords || !Array.isArray(newRecords)) {
+      return res.status(400).json({ message: "No new records provided" });
+    }
+
+    let insertedCount = 0;
+    for (let row of newRecords) {
+      // Create concatenated name from individual components
+      const nameParts = [
+        row["First Name"]?.toString().trim(),
+        row["Middle Name"]?.toString().trim(),
+        row["Last Name"]?.toString().trim(),
+        row["Ext. Name"]?.toString().trim()
+      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+      
+      const concatenatedName = nameParts.join(' ');
+      
+      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+      const finalName = (row["Name"]?.toString().trim() &&
+                        row["Name"].toString().trim() !== 'null' &&
+                        row["Name"].toString().trim() !== 'undefined')
+                       ? row["Name"].toString().trim()
+                       : concatenatedName;
+
+      await pool.query(
+        `INSERT INTO uploaded_beneficiaries (
+          project_series, id_number, name, first_name, middle_name, last_name, ext_name,
+          birthdate, barangay, city_municipality, province, district, type_of_id, id_no,
+          contact_no, type_of_beneficiary, occupation, sex, civil_status, age, dependent
+        ) VALUES (
+          $1,$2,$3,$4,$5,$6,$7,
+          $8,$9,$10,$11,$12,$13,$14,
+          $15,$16,$17,$18,$19,$20,$21
+        )`,
+        [
+          row["Project Series"],
+          row["ID Number"],
+          finalName,
+          row["First Name"],
+          row["Middle Name"],
+          row["Last Name"],
+          row["Ext. Name"],
+          row["Birthdate"] ? new Date(row["Birthdate"]) : null,
+          row["Barangay"],
+          row["City Municipality"],
+          row["Province"],
+          row["District"],
+          row["Type of ID"],
+          row["ID No."],
+          row["Contact No."],
+          row["Type of Beneficiary"],
+          row["Occupation"],
+          row["Sex"],
+          row["Civil Status"],
+          row["Age"] ? parseInt(row["Age"]) : null,
+          row["Dependent"],
+        ]
+      );
+      insertedCount++;
+    }
+
+    res.json({
+      message: "New records uploaded successfully",
+      recordsInserted: insertedCount
+    });
+
+  } catch (err) {
+    console.error("Upload error:", err);
+    res.status(500).json({ message: "Upload failed", error: err.message });
+  }
+});
+
+// Get database statistics for admin dashboard
+router.get("/admin-statistics", async (req, res) => {
+  try {
+    // Total beneficiaries
+    const totalResult = await pool.query("SELECT COUNT(*) as total FROM uploaded_beneficiaries");
+    const totalBeneficiaries = parseInt(totalResult.rows[0].total);
+
+    // Records by project series (top 10 for display)
+    const projectSeriesResult = await pool.query(`
+      SELECT
+        project_series,
+        COUNT(*) as count
+      FROM uploaded_beneficiaries
+      WHERE project_series IS NOT NULL AND project_series != ''
+      GROUP BY project_series
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+
+    // Total unique project series count
+    const totalProjectSeriesResult = await pool.query(`
+      SELECT COUNT(DISTINCT project_series) as total_unique_project_series
+      FROM uploaded_beneficiaries
+      WHERE project_series IS NOT NULL AND project_series != ''
+    `);
+
+    // Records by province
+    const provinceResult = await pool.query(`
+      SELECT
+        province,
+        COUNT(*) as count
+      FROM uploaded_beneficiaries
+      WHERE province IS NOT NULL AND province != ''
+      GROUP BY province
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+
+    // Records by city/municipality
+    const cityResult = await pool.query(`
+      SELECT
+        city_municipality,
+        COUNT(*) as count
+      FROM uploaded_beneficiaries
+      WHERE city_municipality IS NOT NULL AND city_municipality != ''
+      GROUP BY city_municipality
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+
+    // Gender distribution
+    const genderResult = await pool.query(`
+      SELECT
+        sex,
+        COUNT(*) as count
+      FROM uploaded_beneficiaries
+      WHERE sex IS NOT NULL AND sex != ''
+      GROUP BY sex
+      ORDER BY count DESC
+    `);
+
+    // Age statistics
+    const ageStatsResult = await pool.query(`
+      SELECT
+        AVG(age) as avg_age,
+        MIN(age) as min_age,
+        MAX(age) as max_age,
+        COUNT(CASE WHEN age IS NOT NULL AND age > 0 THEN 1 END) as age_records
+      FROM uploaded_beneficiaries
+    `);
+
+    // Users count
+    const usersResult = await pool.query("SELECT COUNT(*) as total FROM users");
+    const totalUsers = parseInt(usersResult.rows[0].total);
+
+    // Beneficiary types
+    const beneficiaryTypeResult = await pool.query(`
+      SELECT
+        type_of_beneficiary,
+        COUNT(*) as count
+      FROM uploaded_beneficiaries
+      WHERE type_of_beneficiary IS NOT NULL AND type_of_beneficiary != ''
+      GROUP BY type_of_beneficiary
+      ORDER BY count DESC
+    `);
+
+    res.json({
+      totalBeneficiaries,
+      totalUsers,
+      totalProjectSeries: parseInt(totalProjectSeriesResult.rows[0].total_unique_project_series),
+      projectSeries: projectSeriesResult.rows,
+      provinces: provinceResult.rows,
+      cities: cityResult.rows,
+      genderDistribution: genderResult.rows,
+      ageStats: ageStatsResult.rows[0],
+      beneficiaryTypes: beneficiaryTypeResult.rows
+    });
+
+  } catch (err) {
+    console.error("Statistics error:", err);
+    res.status(500).json({ message: "Failed to fetch statistics", error: err.message });
   }
 });
 

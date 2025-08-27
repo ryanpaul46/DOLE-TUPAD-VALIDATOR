@@ -1,5 +1,7 @@
 import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col } from "react-bootstrap";
 import { useState } from "react";
+import { Download } from "react-bootstrap-icons";
+import * as XLSX from "xlsx";
 import api from "../api/axios";
 
 export default function DetectDuplicate() {
@@ -10,6 +12,38 @@ export default function DetectDuplicate() {
   const [compareResult, setCompareResult] = useState(null);
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
+
+  // Helper function to concatenate full name from individual components
+  const concatenateFullName = (record) => {
+    if (!record) return '';
+    
+    const nameParts = [
+      record.first_name,
+      record.middle_name,
+      record.last_name,
+      record.ext_name
+    ].filter(part => part && part.trim().length > 0 && part.trim() !== 'null' && part.trim() !== 'undefined');
+    
+    return nameParts.join(' ');
+  };
+
+  // Helper function to get display name (uses existing name or concatenated)
+  const getDisplayName = (record) => {
+    if (!record) return '';
+    
+    // If there's already a name field and it's not empty, use it
+    if (record.name && record.name.trim() && record.name.trim() !== 'null' && record.name.trim() !== 'undefined') {
+      return record.name.trim();
+    }
+    
+    // Otherwise, create concatenated name
+    return concatenateFullName(record);
+  };
+
+  // Check if name was concatenated (no existing name field)
+  const isNameConcatenated = (record) => {
+    return !record.name || !record.name.trim() || record.name.trim() === 'null' || record.name.trim() === 'undefined';
+  };
 
   const handleCompare = async () => {
     if (!file) {
@@ -68,34 +102,171 @@ export default function DetectDuplicate() {
     setError("");
   };
 
-  // Get all column headers from both Excel and database data
-  const getAllColumnHeaders = () => {
-    const headers = new Set();
-    
-    if (compareResult && compareResult.duplicates.length > 0) {
-      // Get headers from Excel data
-      compareResult.duplicates.forEach(dup => {
-        Object.keys(dup.excel_row.data).forEach(header => headers.add(header));
-      });
-      
-      // Get headers from database data
-      compareResult.duplicates.forEach(dup => {
-        Object.keys(dup.database_record).forEach(header => headers.add(header));
+  // Define uniform headers for comparison tables
+  const getUniformHeaders = () => {
+    return [
+      { key: 'name', excelKey: 'Name', dbKey: 'name', label: 'Full Name' },
+      { key: 'first_name', excelKey: 'First Name', dbKey: 'first_name', label: 'First Name' },
+      { key: 'middle_name', excelKey: 'Middle Name', dbKey: 'middle_name', label: 'Middle Name' },
+      { key: 'last_name', excelKey: 'Last Name', dbKey: 'last_name', label: 'Last Name' },
+      { key: 'ext_name', excelKey: 'Ext. Name', dbKey: 'ext_name', label: 'Extension' },
+      { key: 'project_series', excelKey: 'Project Series', dbKey: 'project_series', label: 'Project Series' },
+      { key: 'id_number', excelKey: 'ID Number', dbKey: 'id_number', label: 'ID Number' },
+      { key: 'birthdate', excelKey: 'Birthdate', dbKey: 'birthdate', label: 'Birthdate' },
+      { key: 'barangay', excelKey: 'Barangay', dbKey: 'barangay', label: 'Barangay' },
+      { key: 'city_municipality', excelKey: 'City Municipality', dbKey: 'city_municipality', label: 'City/Municipality' },
+      { key: 'province', excelKey: 'Province', dbKey: 'province', label: 'Province' },
+      { key: 'district', excelKey: 'District', dbKey: 'district', label: 'District' },
+      { key: 'type_of_id', excelKey: 'Type of ID', dbKey: 'type_of_id', label: 'Type of ID' },
+      { key: 'id_no', excelKey: 'ID No.', dbKey: 'id_no', label: 'ID No.' },
+      { key: 'contact_no', excelKey: 'Contact No.', dbKey: 'contact_no', label: 'Contact No.' },
+      { key: 'type_of_beneficiary', excelKey: 'Type of Beneficiary', dbKey: 'type_of_beneficiary', label: 'Beneficiary Type' },
+      { key: 'occupation', excelKey: 'Occupation', dbKey: 'occupation', label: 'Occupation' },
+      { key: 'sex', excelKey: 'Sex', dbKey: 'sex', label: 'Sex' },
+      { key: 'civil_status', excelKey: 'Civil Status', dbKey: 'civil_status', label: 'Civil Status' },
+      { key: 'age', excelKey: 'Age', dbKey: 'age', label: 'Age' },
+      { key: 'dependent', excelKey: 'Dependent', dbKey: 'dependent', label: 'Dependent' }
+    ];
+  };
+
+  // Get headers that exist in the current data
+  const getAvailableHeaders = () => {
+    const uniformHeaders = getUniformHeaders();
+    const availableHeaders = [];
+
+    if (compareResult && (compareResult.duplicates.length > 0 || compareResult.originals.length > 0)) {
+      uniformHeaders.forEach(header => {
+        let hasData = false;
+        
+        // Check duplicates data
+        if (compareResult.duplicates.length > 0) {
+          compareResult.duplicates.forEach(dup => {
+            if (dup.excel_row.data.hasOwnProperty(header.excelKey) ||
+                dup.database_record.hasOwnProperty(header.dbKey)) {
+              hasData = true;
+            }
+          });
+        }
+        
+        // Check originals data
+        if (!hasData && compareResult.originals.length > 0) {
+          compareResult.originals.forEach(orig => {
+            if (orig.data.hasOwnProperty(header.excelKey)) {
+              hasData = true;
+            }
+          });
+        }
+        
+        if (hasData) {
+          availableHeaders.push(header);
+        }
       });
     }
     
-    if (compareResult && compareResult.originals.length > 0) {
-      compareResult.originals.forEach(orig => {
-        Object.keys(orig.data).forEach(header => headers.add(header));
-      });
+    return availableHeaders;
+  };
+
+  // Get value from record using uniform header mapping
+  const getUniformValue = (record, header, isExcelData = false) => {
+    const key = isExcelData ? header.excelKey : header.dbKey;
+    let value = record[key];
+    
+    // Special handling for name field with concatenation
+    if (header.key === 'name') {
+      // For Excel data, check if there's a 'Name' field, otherwise concatenate
+      if (isExcelData) {
+        if (record['Name'] && record['Name'].trim() && record['Name'].trim() !== 'null' && record['Name'].trim() !== 'undefined') {
+          value = record['Name'].trim();
+        } else {
+          // Create concatenated name from Excel field names
+          const nameParts = [
+            record['First Name'],
+            record['Middle Name'],
+            record['Last Name'],
+            record['Ext. Name']
+          ].filter(part => part && part.toString().trim().length > 0 && part.toString().trim() !== 'null' && part.toString().trim() !== 'undefined');
+          value = nameParts.join(' ');
+        }
+      } else {
+        // For database data, use existing getDisplayName logic
+        value = getDisplayName(record);
+      }
     }
     
-    return Array.from(headers);
+    // Handle dates
+    if (header.key === 'birthdate' && value) {
+      try {
+        const date = new Date(value);
+        value = date.toLocaleDateString();
+      } catch (e) {
+        // Keep original value if date parsing fails
+      }
+    }
+    
+    return value !== undefined && value !== null ? String(value) : '';
+  };
+
+  // Check if Excel data should show concatenated indicator
+  const isExcelNameConcatenated = (record) => {
+    return !record['Name'] || !record['Name'].trim() || record['Name'].trim() === 'null' || record['Name'].trim() === 'undefined';
   };
 
   // Check if values are different
   const isDifferent = (dbValue, excelValue) => {
     return dbValue !== excelValue;
+  };
+
+  // Function to download duplicate comparison data as Excel
+  const downloadDuplicatesAsExcel = () => {
+    if (!compareResult || compareResult.duplicates.length === 0) {
+      alert("No duplicate data to download");
+      return;
+    }
+
+    const availableHeaders = getAvailableHeaders();
+    const workbookData = [];
+
+    // Add headers
+    const headerRow = ['Source', ...availableHeaders.map(h => h.label)];
+    workbookData.push(headerRow);
+
+    // Add duplicate comparison data
+    compareResult.duplicates.forEach((dup, idx) => {
+      // Database row
+      const dbRow = [
+        'Database',
+        ...availableHeaders.map(header =>
+          getUniformValue(dup.database_record, header, false)
+        )
+      ];
+      workbookData.push(dbRow);
+
+      // Excel row
+      const excelRow = [
+        'Excel',
+        ...availableHeaders.map(header =>
+          getUniformValue(dup.excel_row.data, header, true)
+        )
+      ];
+      workbookData.push(excelRow);
+
+      // Empty row for spacing (optional)
+      workbookData.push(['']);
+    });
+
+    // Create workbook and worksheet
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.aoa_to_sheet(workbookData);
+
+    // Add worksheet to workbook
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Duplicate Comparison');
+
+    // Generate filename with current date
+    const currentDate = new Date().toISOString().slice(0, 10);
+    const filename = `DOLE_TUPAD_Duplicates_${currentDate}.xlsx`;
+
+    // Download file
+    XLSX.writeFile(workbook, filename);
   };
 
   return (
@@ -159,15 +330,26 @@ export default function DetectDuplicate() {
           {/* Duplicate Rows Comparison */}
           {compareResult.duplicates.length > 0 && (
             <Card className="mb-4">
-              <Card.Header className="text-danger">Duplicate Rows Comparison</Card.Header>
+              <Card.Header className="text-danger d-flex justify-content-between align-items-center">
+                <span>Duplicate Rows Comparison</span>
+                <Button
+                  variant="outline-success"
+                  size="sm"
+                  onClick={downloadDuplicatesAsExcel}
+                  className="d-flex align-items-center gap-1"
+                >
+                  <Download size={16} />
+                  Download Excel
+                </Button>
+              </Card.Header>
               <Card.Body className="p-0">
                 <div className="table-container" style={{ maxHeight: "60vh", overflow: "auto" }}>
                   <Table striped bordered hover size="sm" className="mb-0">
                     <thead className="position-sticky top-0 bg-light">
                       <tr>
-                        <th>Row #</th>
-                        {getAllColumnHeaders().map((header, idx) => (
-                          <th key={idx}>{header}</th>
+                        <th>Source</th>
+                        {getAvailableHeaders().map((header, idx) => (
+                          <th key={idx}>{header.label}</th>
                         ))}
                       </tr>
                     </thead>
@@ -176,41 +358,47 @@ export default function DetectDuplicate() {
                         <>
                           {/* Database Row */}
                           <tr className="table-info">
-                            <td>Database</td>
-                            {getAllColumnHeaders().map((header, colIdx) => {
-                              const dbValue = dup.database_record[header];
-                              const excelValue = dup.excel_row.data[header];
+                            <td><strong>Database</strong></td>
+                            {getAvailableHeaders().map((header, colIdx) => {
+                              const dbValue = getUniformValue(dup.database_record, header, false);
+                              const excelValue = getUniformValue(dup.excel_row.data, header, true);
                               const isDiff = isDifferent(dbValue, excelValue);
+                              
+                              let displayValue = dbValue;
+                              
                               return (
-                                <td 
-                                  key={`db-${idx}-${colIdx}`} 
+                                <td
+                                  key={`db-${idx}-${colIdx}`}
                                   className={isDiff ? "table-warning fw-bold" : ""}
                                 >
-                                  {dbValue !== undefined ? String(dbValue) : ''}
+                                  {displayValue}
                                 </td>
                               );
                             })}
                           </tr>
                           {/* Excel Row */}
                           <tr className="table-warning">
-                            <td>Excel</td>
-                            {getAllColumnHeaders().map((header, colIdx) => {
-                              const dbValue = dup.database_record[header];
-                              const excelValue = dup.excel_row.data[header];
+                            <td><strong>Excel</strong></td>
+                            {getAvailableHeaders().map((header, colIdx) => {
+                              const dbValue = getUniformValue(dup.database_record, header, false);
+                              const excelValue = getUniformValue(dup.excel_row.data, header, true);
                               const isDiff = isDifferent(dbValue, excelValue);
+                              
+                              let displayValue = excelValue;
+                              
                               return (
-                                <td 
-                                  key={`excel-${idx}-${colIdx}`} 
+                                <td
+                                  key={`excel-${idx}-${colIdx}`}
                                   className={isDiff ? "table-danger fw-bold" : ""}
                                 >
-                                  {excelValue !== undefined ? String(excelValue) : ''}
+                                  {displayValue}
                                 </td>
                               );
                             })}
                           </tr>
                           {/* Empty row for spacing */}
                           <tr>
-                            <td colSpan={getAllColumnHeaders().length + 1} className="p-1"></td>
+                            <td colSpan={getAvailableHeaders().length + 1} className="p-1"></td>
                           </tr>
                         </>
                       ))}
@@ -231,8 +419,8 @@ export default function DetectDuplicate() {
                     <thead className="position-sticky top-0 bg-light">
                       <tr>
                         <th>Row #</th>
-                        {getAllColumnHeaders().map((header, idx) => (
-                          <th key={idx}>{header}</th>
+                        {getAvailableHeaders().map((header, idx) => (
+                          <th key={idx}>{header.label}</th>
                         ))}
                       </tr>
                     </thead>
@@ -240,9 +428,15 @@ export default function DetectDuplicate() {
                       {compareResult.originals.map((row, idx) => (
                         <tr key={idx} className="table-success">
                           <td>{row.row_number}</td>
-                          {getAllColumnHeaders().map((header, colIdx) => (
-                            <td key={colIdx}>{row.data[header] !== undefined ? String(row.data[header]) : ''}</td>
-                          ))}
+                          {getAvailableHeaders().map((header, colIdx) => {
+                            const value = getUniformValue(row.data, header, true);
+                            
+                            return (
+                              <td key={colIdx}>
+                                {value}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>
@@ -278,7 +472,9 @@ export default function DetectDuplicate() {
                     <tr key={b.id}>
                       <td>{b.project_series}</td>
                       <td>{b.id_number}</td>
-                      <td>{b.name}</td>
+                      <td>
+                        {getDisplayName(b)}
+                      </td>
                       <td>{b.first_name}</td>
                       <td>{b.last_name}</td>
                       <td>{b.barangay}</td>

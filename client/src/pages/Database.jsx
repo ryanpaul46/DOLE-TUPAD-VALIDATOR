@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useOutletContext } from "react-router-dom";
-import { Container, Button, Form, Spinner, Alert, Table, Pagination, Card, Row, Col, InputGroup } from "react-bootstrap";
+import { Container, Button, Form, Spinner, Alert, Table, Pagination, Card, Row, Col, InputGroup, Badge, Modal } from "react-bootstrap";
+import { Upload, Search, ExclamationTriangle, CheckCircle } from "react-bootstrap-icons";
 import api from "../api/axios";
 
 export default function Database() {
@@ -16,6 +17,13 @@ export default function Database() {
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const itemsPerPage = 20; // Increased items per page
+
+  // Smart upload with scanning states
+  const [scanFile, setScanFile] = useState(null);
+  const [scanResults, setScanResults] = useState(null);
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   // Fetch data and column information
   const fetchData = async () => {
@@ -83,6 +91,65 @@ export default function Database() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Smart upload with duplicate scanning
+  const handleScanUpload = async () => {
+    if (!scanFile) {
+      setError("Please select a file first");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("excelFile", scanFile);
+
+    try {
+      setScanning(true);
+      setError("");
+      
+      const response = await api.post("/api/upload-excel-with-scan", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      
+      setScanResults(response.data.scanResults);
+      setShowScanModal(true);
+    } catch (err) {
+      console.error("Scan failed:", err);
+      setError("File scan failed. Please try again.");
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // Upload only new records after confirmation
+  const handleUploadNewRecords = async () => {
+    if (!scanResults || !scanResults.newRecords) return;
+
+    try {
+      setUploading(true);
+      await api.post("/api/upload-new-records", {
+        newRecords: scanResults.newRecords
+      });
+      
+      // Refresh data and close modal
+      await fetchData();
+      setShowScanModal(false);
+      setScanResults(null);
+      setScanFile(null);
+      setError("");
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Close scan modal
+  const handleCloseScanModal = () => {
+    setShowScanModal(false);
+    setScanResults(null);
+    setScanFile(null);
   };
 
   // Filter data based on search term
@@ -159,29 +226,68 @@ export default function Database() {
         <Card className="mb-4">
           <Card.Header>Admin Controls</Card.Header>
           <Card.Body>
-            <div className="d-flex gap-2 flex-wrap align-items-center">
-              <Form.Control
-                type="file"
-                accept=".xlsx, .xls"
-                onChange={(e) => setFile(e.target.files[0])}
-                style={{ maxWidth: "300px" }}
-              />
-              <Button 
-                variant="primary" 
-                onClick={handleUpload} 
-                disabled={loading || !file}
-                size="sm"
-              >
-                {loading ? <Spinner size="sm" animation="border" /> : "Upload Excel"}
-              </Button>
-              <Button 
-                variant="danger" 
-                onClick={handleClear} 
-                disabled={loading || data.length === 0}
-                size="sm"
-              >
-                {loading ? <Spinner size="sm" animation="border" /> : "Clear Database"}
-              </Button>
+            {/* Smart Upload with Duplicate Scanning */}
+            <div className="mb-3">
+              <h6 className="text-success mb-2">
+                <Upload size={16} className="me-1" />
+                Smart Upload (Recommended)
+              </h6>
+              <p className="text-muted small mb-2">
+                Upload Excel file with automatic duplicate scanning before adding to database
+              </p>
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                <Form.Control
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={(e) => setScanFile(e.target.files[0])}
+                  style={{ maxWidth: "300px" }}
+                />
+                <Button
+                  variant="success"
+                  onClick={handleScanUpload}
+                  disabled={scanning || !scanFile}
+                  size="sm"
+                >
+                  {scanning ? <Spinner size="sm" animation="border" /> : "Scan & Upload"}
+                </Button>
+              </div>
+            </div>
+
+            <hr />
+
+            {/* Direct Upload */}
+            <div>
+              <h6 className="text-warning mb-2">
+                <ExclamationTriangle size={16} className="me-1" />
+                Direct Upload (No Duplicate Check)
+              </h6>
+              <p className="text-muted small mb-2">
+                Upload Excel file directly without duplicate scanning
+              </p>
+              <div className="d-flex gap-2 flex-wrap align-items-center">
+                <Form.Control
+                  type="file"
+                  accept=".xlsx, .xls"
+                  onChange={(e) => setFile(e.target.files[0])}
+                  style={{ maxWidth: "300px" }}
+                />
+                <Button
+                  variant="primary"
+                  onClick={handleUpload}
+                  disabled={loading || !file}
+                  size="sm"
+                >
+                  {loading ? <Spinner size="sm" animation="border" /> : "Upload Excel"}
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleClear}
+                  disabled={loading || data.length === 0}
+                  size="sm"
+                >
+                  {loading ? <Spinner size="sm" animation="border" /> : "Clear Database"}
+                </Button>
+              </div>
             </div>
           </Card.Body>
         </Card>
@@ -297,6 +403,120 @@ export default function Database() {
           </Col>
         </Row>
       )}
+
+      {/* Scan Results Modal */}
+      <Modal show={showScanModal} onHide={handleCloseScanModal} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>
+            <Search size={20} className="me-2" />
+            Duplicate Scan Results
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {scanResults && (
+            <>
+              <div className="mb-4">
+                <h5>Scan Summary</h5>
+                <Row>
+                  <Col md={4}>
+                    <Card className="text-center">
+                      <Card.Body>
+                        <h3 className="text-primary">{scanResults.totalRows}</h3>
+                        <small className="text-muted">Total Rows Scanned</small>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                  <Col md={4}>
+                    <Card className="text-center">
+                      <Card.Body>
+                        <h3 className="text-danger">{scanResults.duplicatesFound}</h3>
+                        <small className="text-muted">Duplicates Found</small>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                  <Col md={4}>
+                    <Card className="text-center">
+                      <Card.Body>
+                        <h3 className="text-success">{scanResults.newRecordsFound}</h3>
+                        <small className="text-muted">New Records</small>
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                </Row>
+              </div>
+
+              {scanResults.duplicatesFound > 0 && (
+                <Alert variant="warning">
+                  <ExclamationTriangle size={16} className="me-1" />
+                  <strong>Duplicates Found:</strong> {scanResults.duplicatesFound} records already exist in the database and will be skipped.
+                </Alert>
+              )}
+
+              {scanResults.newRecordsFound > 0 && (
+                <Alert variant="success">
+                  <CheckCircle size={16} className="me-1" />
+                  <strong>New Records:</strong> {scanResults.newRecordsFound} new records ready to be added to the database.
+                </Alert>
+              )}
+
+              {scanResults.newRecordsFound === 0 && (
+                <Alert variant="info">
+                  No new records found. All entries already exist in the database.
+                </Alert>
+              )}
+
+              {/* Sample of new records */}
+              {scanResults.newRecords && scanResults.newRecords.length > 0 && (
+                <div className="mt-3">
+                  <h6>Sample of New Records (First 5):</h6>
+                  <div className="table-responsive" style={{ maxHeight: "300px", overflow: "auto" }}>
+                    <Table striped bordered size="sm">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>First Name</th>
+                          <th>Last Name</th>
+                          <th>Project Series</th>
+                          <th>Barangay</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {scanResults.newRecords.slice(0, 5).map((record, idx) => (
+                          <tr key={idx}>
+                            <td>{record.finalName || '-'}</td>
+                            <td>{record["First Name"] || '-'}</td>
+                            <td>{record["Last Name"] || '-'}</td>
+                            <td>{record["Project Series"] || '-'}</td>
+                            <td>{record["Barangay"] || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                    {scanResults.newRecords.length > 5 && (
+                      <small className="text-muted">... and {scanResults.newRecords.length - 5} more records</small>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseScanModal}>
+            Cancel
+          </Button>
+          {scanResults && scanResults.newRecordsFound > 0 && (
+            <Button
+              variant="success"
+              onClick={handleUploadNewRecords}
+              disabled={uploading}
+            >
+              {uploading ? <Spinner size="sm" animation="border" className="me-1" /> : null}
+              Upload {scanResults.newRecordsFound} New Records
+            </Button>
+          )}
+        </Modal.Footer>
+      </Modal>
     </Container>
   );
 }
