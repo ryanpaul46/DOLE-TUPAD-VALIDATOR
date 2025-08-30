@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
-import {
-  Table,
-  Button,
-  Spinner,
-  Alert,
-  Modal,
-  Form,
-} from "react-bootstrap";
+import { Table, Button, Spinner, Alert, Modal, Form, Toast,} from "react-bootstrap";
+
+const INITIAL_FORM_STATE = {
+  id: null,
+  username: "",
+  password: "",
+  first_name: "",
+  last_name: "",
+  email: "",
+  role: "client",
+};
 
 export default function AdminUsers() {
   const [users, setUsers] = useState([]);
@@ -18,85 +21,95 @@ export default function AdminUsers() {
   // Modal state
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [formUser, setFormUser] = useState({
-    id: null,
-    username: "",
-    password: "",
-    first_name: "",
-    last_name: "",
-    email: "",
-    role: "client",
-  });
+  const [formUser, setFormUser] = useState(INITIAL_FORM_STATE);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userToDelete, setUserToDelete] = useState(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const [toastVariant, setToastVariant] = useState("info");
 
   const navigate = useNavigate();
 
+  const getToken = useCallback(() => {
+    try {
+      return localStorage.getItem("token");
+    } catch (error) {
+      return null;
+    }
+  }, []);
+
+  const showNotification = useCallback((message, variant = "info") => {
+    setToastMessage(message);
+    setToastVariant(variant);
+    setShowToast(true);
+  }, []);
+
   // redirect if no token
   useEffect(() => {
-    if (!localStorage.getItem("token")) navigate("/login", { replace: true });
-  }, [navigate]);
+    if (!getToken()) navigate("/login", { replace: true });
+  }, [navigate, getToken]);
 
   useEffect(() => {
     fetchUsers();
   }, []);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const res = await api.get("/api/users", {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
-      // Ensure the response data is an array
+      const res = await api.get("/api/users");
       const userData = Array.isArray(res.data) ? res.data : [];
       setUsers(userData);
     } catch (err) {
       const msg =
         err.response?.data?.message || err.message || "Failed to fetch users";
       setError(msg);
-      setUsers([]); // Reset to empty array on error
-      console.error("GET /api/users failed:", err);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleDelete = async (userId) => {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
+  const handleDeleteClick = useCallback((user) => {
+    setUserToDelete(user);
+    setShowDeleteModal(true);
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!userToDelete) return;
+    
     try {
-      await api.delete(`/api/users/${userId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      await api.delete(`/api/users/${userToDelete.id}`);
+      setUsers((prev) => prev.filter((u) => u.id !== userToDelete.id));
+      showNotification("User deleted successfully", "success");
     } catch (err) {
       const msg =
         err.response?.data?.message || err.message || "Failed to delete user";
-      alert(msg);
-      console.error("DELETE /api/users/:id failed:", err);
+      showNotification(msg, "danger");
+    } finally {
+      setShowDeleteModal(false);
+      setUserToDelete(null);
     }
-  };
+  }, [userToDelete, showNotification]);
 
-  const handleChange = (e) => {
+  const handleChange = useCallback((e) => {
     const { name, value } = e.target;
     setFormUser((prev) => ({ ...prev, [name]: value }));
-  };
+  }, []);
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     try {
       if (isEditing) {
-        // update
-        const res = await api.put(`/api/users/${formUser.id}`, formUser, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-        });
+        const res = await api.put(`/api/users/${formUser.id}`, formUser);
         setUsers((prev) =>
           prev.map((u) => (u.id === formUser.id ? res.data : u))
         );
+        showNotification("User updated successfully", "success");
       } else {
-        // create
-        const res = await api.post("/api/users", formUser, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-        });
+        const res = await api.post("/api/users", formUser);
         setUsers((prev) => [...prev, res.data]);
+        showNotification("User created successfully", "success");
       }
       setShowModal(false);
       resetForm();
@@ -105,34 +118,25 @@ export default function AdminUsers() {
         err.response?.data?.message ||
         err.message ||
         (isEditing ? "Failed to update user" : "Failed to create user");
-      alert(msg);
-      console.error("User save failed:", err);
+      showNotification(msg, "danger");
     }
-  };
+  }, [isEditing, formUser, showNotification]);
 
-  const handleAdd = () => {
+  const handleAdd = useCallback(() => {
     resetForm();
     setIsEditing(false);
     setShowModal(true);
-  };
+  }, []);
 
-  const handleEdit = (user) => {
+  const handleEdit = useCallback((user) => {
     setFormUser(user);
     setIsEditing(true);
     setShowModal(true);
-  };
+  }, []);
 
-  const resetForm = () => {
-    setFormUser({
-      id: null,
-      username: "",
-      password: "",
-      first_name: "",
-      last_name: "",
-      email: "",
-      role: "client",
-    });
-  };
+  const resetForm = useCallback(() => {
+    setFormUser(INITIAL_FORM_STATE);
+  }, []);
 
   return (
     <div>
@@ -177,7 +181,7 @@ export default function AdminUsers() {
                     </button>
                     <button
                       className="btn btn-danger btn-sm"
-                      onClick={() => handleDelete(u.id)}
+                      onClick={() => handleDeleteClick(u)}
                     >
                       Delete
                     </button>
@@ -282,6 +286,31 @@ export default function AdminUsers() {
           </Modal.Footer>
         </Form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Confirm Delete</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          Are you sure you want to delete user "{userToDelete?.username}"? This action cannot be undone.
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowDeleteModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={handleDeleteConfirm}>
+            Delete
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Toast Notifications */}
+      <div className="position-fixed top-0 end-0 p-3" style={{ zIndex: 1050 }}>
+        <Toast show={showToast} onClose={() => setShowToast(false)} delay={3000} autohide bg={toastVariant}>
+          <Toast.Body className="text-white">{toastMessage}</Toast.Body>
+        </Toast>
+      </div>
     </div>
   );
 }

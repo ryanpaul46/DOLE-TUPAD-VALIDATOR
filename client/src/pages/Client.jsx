@@ -1,34 +1,46 @@
-import { useState, useEffect } from "react";
-import { Container, Table, Card, Row, Col } from "react-bootstrap";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Container, Table, Card, Row, Col, Button, Alert } from "react-bootstrap";
+import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 
-export default function ClientDatabase() {
+export default function Client() {
   const [data, setData] = useState([]);
-  const [uniqueCounts, setUniqueCounts] = useState({
-    total_unique_municipalities: 0,
-    total_unique_barangay: 0
-  });
+  const [uniqueCounts, setUniqueCounts] = useState({});
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
+      setError("");
       const res = await api.get("/api/beneficiaries-by-project-series");
-      setData(res.data.projectSeries);
-      setUniqueCounts(res.data.uniqueCounts);
+      setData(res.data.projectSeries || []);
+      setUniqueCounts(res.data.uniqueCounts || {});
     } catch (err) {
-      console.error("Failed fetching data:", err);
+      setError("Failed to load project series data. Please try again later.");
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
-  // Calculate totals for summary card
-  const totalBeneficiaries = data.reduce((sum, item) => sum + parseInt(item.beneficiary_count), 0);
+  const totalBeneficiaries = useMemo(() => {
+    return data.reduce((sum, item) => sum + parseInt(item.beneficiary_count || 0, 10), 0);
+  }, [data]);
+
+  const handleDuplicateCheck = useCallback(() => {
+    navigate('/client/duplicate-check');
+  }, [navigate]);
+
+  const handleViewDatabase = useCallback(() => {
+    navigate('/client/database');
+  }, [navigate]);
 
   return (
     <Container fluid className="p-4 flex-grow-1 overflow-auto" style={{ minHeight: 0 }}>
       <h2>Project Series Breakdown</h2>
+      
+      {error && <Alert variant="danger">{error}</Alert>}
       
       {/* Summary Cards */}
       <Row className="mb-4">
@@ -52,7 +64,7 @@ export default function ClientDatabase() {
           <Card className="text-center">
             <Card.Body>
               <Card.Title>Municipalities</Card.Title>
-              <Card.Text className="display-4">{uniqueCounts.total_unique_municipalities}</Card.Text>
+              <Card.Text className="display-4">{uniqueCounts.total_unique_municipalities || 0}</Card.Text>
             </Card.Body>
           </Card>
         </Col>
@@ -60,7 +72,7 @@ export default function ClientDatabase() {
           <Card className="text-center">
             <Card.Body>
               <Card.Title>Barangays</Card.Title>
-              <Card.Text className="display-4">{uniqueCounts.total_unique_barangay}</Card.Text>
+              <Card.Text className="display-4">{uniqueCounts.total_unique_barangay || 0}</Card.Text>
             </Card.Body>
           </Card>
         </Col>
@@ -79,11 +91,11 @@ export default function ClientDatabase() {
           </thead>
           <tbody>
             {data.map((item, idx) => (
-              <tr key={idx}>
-                <td>{item.project_series}</td>
-                <td>{item.beneficiary_count}</td>
-                <td>{item.municipality_count}</td>
-                <td>{item.total_unique_barangay}</td>
+              <tr key={`project-${item.project_series || idx}`}>
+                <td>{item.project_series || 'Unknown'}</td>
+                <td>{item.beneficiary_count || 0}</td>
+                <td>{item.municipality_count || 0}</td>
+                <td>{item.total_unique_barangay || 0}</td>
               </tr>
             ))}
           </tbody>
@@ -95,6 +107,38 @@ export default function ClientDatabase() {
           <p>No project series data available. Please upload beneficiary data first.</p>
         </div>
       )}
+      
+      {/* Quick Actions */}
+      <Row className="mt-4">
+        <Col md={6} className="mb-3">
+          <Card className="text-center h-100">
+            <Card.Body>
+              <Card.Title>Check for Duplicates</Card.Title>
+              <Card.Text>Upload an Excel file to check for duplicate beneficiaries</Card.Text>
+              <Button 
+                variant="primary" 
+                onClick={handleDuplicateCheck}
+              >
+                Start Duplicate Check
+              </Button>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={6} className="mb-3">
+          <Card className="text-center h-100">
+            <Card.Body>
+              <Card.Title>View Database</Card.Title>
+              <Card.Text>Browse and search the complete beneficiary database</Card.Text>
+              <Button 
+                variant="secondary" 
+                onClick={handleViewDatabase}
+              >
+                Browse Database
+              </Button>
+            </Card.Body>
+          </Card>
+        </Col>
+      </Row>
     </Container>
   );
 }

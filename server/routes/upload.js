@@ -5,48 +5,87 @@ import XLSX from "xlsx";
 import { pool } from "../db.js";
 import { OptimizedUploadService } from "../services/optimizedUploadService.js";
 import cacheService from "../services/cacheService.js";
+import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
+import fs from "fs";
 
 const router = express.Router();
 const optimizedService = new OptimizedUploadService();
 
-// Multer storage with absolute path
+// Security utilities
+const sanitizeInput = (input) => {
+  if (!input || typeof input !== 'string') return '';
+  return input.toString().trim().replace(/[\r\n\t\x00-\x1f\x7f-\x9f]/g, '');
+};
+
+const validateFilePath = (filePath) => {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('Invalid file path');
+  }
+  
+  const normalizedPath = path.normalize(filePath);
+  const resolvedPath = path.resolve(normalizedPath);
+  const allowedDir = path.resolve('./uploads');
+  
+  if (!resolvedPath.startsWith(allowedDir)) {
+    throw new Error('Access denied: Path outside allowed directory');
+  }
+  
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error('File does not exist');
+  }
+  
+  return resolvedPath;
+};
+
+const validateCSRF = (req) => {
+  const token = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!token || token !== req.session?.csrfToken) {
+    throw new Error('Invalid CSRF token');
+  }
+};
+
+// Multer storage with path validation
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(process.cwd(), "./uploads")); // Correct uploads folder
+    const uploadsDir = path.resolve('./uploads');
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    cb(null, file.fieldname + "-" + Date.now() + path.extname(file.originalname));
+    const sanitizedOriginalName = sanitizeInput(file.originalname);
+    const ext = path.extname(sanitizedOriginalName);
+    const safeName = file.fieldname + "-" + Date.now() + ext;
+    cb(null, safeName);
   },
 });
 
 const upload = multer({ storage });
 
 // Upload Excel and insert into DB
-router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
+router.post("/upload-excel", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-    const workbook = XLSX.readFile(req.file.path);
+    const validatedPath = validateFilePath(req.file.path);
+    const workbook = XLSX.readFile(validatedPath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
     // Clear existing table if needed or insert rows
     for (let row of data) {
-      // Create concatenated name from individual components
+      // Create concatenated name from individual components with sanitization
       const nameParts = [
-        row["First Name"]?.toString().trim(),
-        row["Middle Name"]?.toString().trim(),
-        row["Last Name"]?.toString().trim(),
-        row["Ext. Name"]?.toString().trim()
+        sanitizeInput(row["First Name"]),
+        sanitizeInput(row["Middle Name"]),
+        sanitizeInput(row["Last Name"]),
+        sanitizeInput(row["Ext. Name"])
       ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
       
       const concatenatedName = nameParts.join(' ');
       
       // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
-      const finalName = (row["Name"]?.toString().trim() &&
-                        row["Name"].toString().trim() !== 'null' &&
-                        row["Name"].toString().trim() !== 'undefined')
-                       ? row["Name"].toString().trim()
+      const nameField = sanitizeInput(row["Name"]);
+      const finalName = (nameField && nameField !== 'null' && nameField !== 'undefined')
+                       ? nameField
                        : concatenatedName;
 
       await pool.query(
@@ -60,27 +99,27 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
           $15,$16,$17,$18,$19,$20,$21
         )`,
         [
-          row["Project Series"],
-          row["ID Number"],
-          finalName, // Use concatenated or existing name
-          row["First Name"],
-          row["Middle Name"],
-          row["Last Name"],
-          row["Ext. Name"],
+          sanitizeInput(row["Project Series"]) || null,
+          sanitizeInput(row["ID Number"]) || null,
+          finalName,
+          sanitizeInput(row["First Name"]) || null,
+          sanitizeInput(row["Middle Name"]) || null,
+          sanitizeInput(row["Last Name"]) || null,
+          sanitizeInput(row["Ext. Name"]) || null,
           row["Birthdate"] ? new Date(row["Birthdate"]) : null,
-          row["Barangay"],
-          row["City Municipality"],
-          row["Province"],
-          row["District"],
-          row["Type of ID"],
-          row["ID No."],
-          row["Contact No."],
-          row["Type of Beneficiary"],
-          row["Occupation"],
-          row["Sex"],
-          row["Civil Status"],
+          sanitizeInput(row["Barangay"]) || null,
+          sanitizeInput(row["City Municipality"]) || null,
+          sanitizeInput(row["Province"]) || null,
+          sanitizeInput(row["District"]) || null,
+          sanitizeInput(row["Type of ID"]) || null,
+          sanitizeInput(row["ID No."]) || null,
+          sanitizeInput(row["Contact No."]) || null,
+          sanitizeInput(row["Type of Beneficiary"]) || null,
+          sanitizeInput(row["Occupation"]) || null,
+          sanitizeInput(row["Sex"]) || null,
+          sanitizeInput(row["Civil Status"]) || null,
           row["Age"] ? parseInt(row["Age"]) : null,
-          row["Dependent"],
+          sanitizeInput(row["Dependent"]) || null,
         ]
       );
     }
@@ -97,12 +136,13 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
 });
 
 // Compare Excel with database (for client duplicate detection based on Names column)
-router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
+router.post("/compare-excel", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     // Read uploaded Excel file
-    const workbook = XLSX.readFile(req.file.path);
+    const validatedPath = validateFilePath(req.file.path);
+    const workbook = XLSX.readFile(validatedPath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
@@ -200,15 +240,16 @@ router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
 });
 
 // Optimized compare Excel endpoint for large files
-router.post("/compare-excel-optimized", upload.single("excelFile"), async (req, res) => {
+router.post("/compare-excel-optimized", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
     console.log('🚀 Starting optimized comparison for large file...');
     
+    const validatedPath = validateFilePath(req.file.path);
     // Use optimized service for chunked processing
     const result = await optimizedService.processExcelInChunks(
-      req.file.path,
+      validatedPath,
       (progress) => {
         // Progress callback - could be sent via WebSocket in the future
         console.log(`Progress: ${progress.percentage}% - ${progress.processed}/${progress.total} rows processed`);
@@ -223,7 +264,7 @@ router.post("/compare-excel-optimized", upload.single("excelFile"), async (req, 
 });
 
 // Fetch all uploaded rows
-router.get("/uploaded-beneficiaries", async (req, res) => {
+router.get("/uploaded-beneficiaries", requireAuth, async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM uploaded_beneficiaries ORDER BY id DESC");
     res.json(result.rows);
@@ -234,7 +275,7 @@ router.get("/uploaded-beneficiaries", async (req, res) => {
 });
 
 // Fetch column information
-router.get("/uploaded-columns", async (req, res) => {
+router.get("/uploaded-columns", requireAuth, async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT column_name, data_type 
@@ -249,7 +290,7 @@ router.get("/uploaded-columns", async (req, res) => {
   }
 });
 
-router.delete("/uploaded-beneficiaries", async (req, res) => {
+router.delete("/uploaded-beneficiaries", requireAdmin, async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries"); // Deletes all rows
     await cacheService.clearAll(); // Clear cache after database clear
@@ -260,7 +301,7 @@ router.delete("/uploaded-beneficiaries", async (req, res) => {
   }
 });
 
-router.delete("/uploaded-clear", async (req, res) => {
+router.delete("/uploaded-clear", requireAdmin, async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries");
     await cacheService.clearAll(); // Clear cache after database clear
@@ -272,7 +313,7 @@ router.delete("/uploaded-clear", async (req, res) => {
 });
 
 // Cache management endpoint
-router.get("/cache-stats", async (req, res) => {
+router.get("/cache-stats", requireAuth, async (req, res) => {
   try {
     const stats = await cacheService.getStats();
     res.json(stats);
@@ -282,7 +323,7 @@ router.get("/cache-stats", async (req, res) => {
   }
 });
 
-router.delete("/clear-cache", async (req, res) => {
+router.delete("/clear-cache", requireAdmin, async (req, res) => {
   try {
     await cacheService.clearAll();
     res.json({ message: "Cache cleared successfully" });
@@ -293,7 +334,7 @@ router.delete("/clear-cache", async (req, res) => {
 });
 
 // Fetch beneficiaries grouped by project series
-router.get("/beneficiaries-by-project-series", async (req, res) => {
+router.get("/beneficiaries-by-project-series", requireAuth, async (req, res) => {
   try {
     // Get project series breakdown
     const projectSeriesResult = await pool.query(`
@@ -329,11 +370,12 @@ router.get("/beneficiaries-by-project-series", async (req, res) => {
 });
 
 // Upload Excel with duplicate scanning (Admin feature)
-router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, res) => {
+router.post("/upload-excel-with-scan", requireAdmin, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-    const workbook = XLSX.readFile(req.file.path);
+    const validatedPath = validateFilePath(req.file.path);
+    const workbook = XLSX.readFile(validatedPath);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
 
@@ -415,7 +457,7 @@ router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, r
 });
 
 // Upload only new records after scan confirmation
-router.post("/upload-new-records", async (req, res) => {
+router.post("/upload-new-records", requireAdmin, async (req, res) => {
   try {
     const { newRecords } = req.body;
     
@@ -425,21 +467,20 @@ router.post("/upload-new-records", async (req, res) => {
 
     let insertedCount = 0;
     for (let row of newRecords) {
-      // Create concatenated name from individual components
+      // Create concatenated name from individual components with sanitization
       const nameParts = [
-        row["First Name"]?.toString().trim(),
-        row["Middle Name"]?.toString().trim(),
-        row["Last Name"]?.toString().trim(),
-        row["Ext. Name"]?.toString().trim()
+        sanitizeInput(row["First Name"]),
+        sanitizeInput(row["Middle Name"]),
+        sanitizeInput(row["Last Name"]),
+        sanitizeInput(row["Ext. Name"])
       ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
       
       const concatenatedName = nameParts.join(' ');
       
       // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
-      const finalName = (row["Name"]?.toString().trim() &&
-                        row["Name"].toString().trim() !== 'null' &&
-                        row["Name"].toString().trim() !== 'undefined')
-                       ? row["Name"].toString().trim()
+      const nameField = sanitizeInput(row["Name"]);
+      const finalName = (nameField && nameField !== 'null' && nameField !== 'undefined')
+                       ? nameField
                        : concatenatedName;
 
       await pool.query(
@@ -453,27 +494,27 @@ router.post("/upload-new-records", async (req, res) => {
           $15,$16,$17,$18,$19,$20,$21
         )`,
         [
-          row["Project Series"],
-          row["ID Number"],
+          sanitizeInput(row["Project Series"]) || null,
+          sanitizeInput(row["ID Number"]) || null,
           finalName,
-          row["First Name"],
-          row["Middle Name"],
-          row["Last Name"],
-          row["Ext. Name"],
+          sanitizeInput(row["First Name"]) || null,
+          sanitizeInput(row["Middle Name"]) || null,
+          sanitizeInput(row["Last Name"]) || null,
+          sanitizeInput(row["Ext. Name"]) || null,
           row["Birthdate"] ? new Date(row["Birthdate"]) : null,
-          row["Barangay"],
-          row["City Municipality"],
-          row["Province"],
-          row["District"],
-          row["Type of ID"],
-          row["ID No."],
-          row["Contact No."],
-          row["Type of Beneficiary"],
-          row["Occupation"],
-          row["Sex"],
-          row["Civil Status"],
+          sanitizeInput(row["Barangay"]) || null,
+          sanitizeInput(row["City Municipality"]) || null,
+          sanitizeInput(row["Province"]) || null,
+          sanitizeInput(row["District"]) || null,
+          sanitizeInput(row["Type of ID"]) || null,
+          sanitizeInput(row["ID No."]) || null,
+          sanitizeInput(row["Contact No."]) || null,
+          sanitizeInput(row["Type of Beneficiary"]) || null,
+          sanitizeInput(row["Occupation"]) || null,
+          sanitizeInput(row["Sex"]) || null,
+          sanitizeInput(row["Civil Status"]) || null,
           row["Age"] ? parseInt(row["Age"]) : null,
-          row["Dependent"],
+          sanitizeInput(row["Dependent"]) || null,
         ]
       );
       insertedCount++;
@@ -491,7 +532,7 @@ router.post("/upload-new-records", async (req, res) => {
 });
 
 // Get database statistics for admin dashboard
-router.get("/admin-statistics", async (req, res) => {
+router.get("/admin-statistics", requireAdmin, async (req, res) => {
   try {
     // Total beneficiaries
     const totalResult = await pool.query("SELECT COUNT(*) as total FROM uploaded_beneficiaries");

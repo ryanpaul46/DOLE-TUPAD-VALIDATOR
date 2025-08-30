@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Container, Button, Form, Spinner, Alert, Table, Pagination, Card, Row, Col, InputGroup, Badge, Modal } from "react-bootstrap";
 import { Upload, Search, ExclamationTriangle, CheckCircle } from "react-bootstrap-icons";
@@ -27,34 +27,30 @@ export default function Database() {
   const [uploading, setUploading] = useState(false);
   const [selectedDuplicates, setSelectedDuplicates] = useState([]);
   const [duplicateRemarks, setDuplicateRemarks] = useState("");
+  const [showClearModal, setShowClearModal] = useState(false);
 
-  // Fetch data and column information
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
       
-      // Fetch column information
       const columnsRes = await api.get("/api/uploaded-columns");
-      setColumns(columnsRes.data.filter(col => col.column_name !== 'id')); // Exclude ID column
+      setColumns(columnsRes.data.filter(col => col.column_name !== 'id'));
       
-      // Fetch data
       const dataRes = await api.get("/api/uploaded-beneficiaries");
       setData(dataRes.data);
     } catch (err) {
-      console.error("Failed fetching data:", err);
       setError("Failed fetching database.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
   }, [role]);
 
-  // Upload Excel (Admin only)
-  const handleUpload = async () => {
+  const handleUpload = useCallback(async () => {
     if (!file) {
       setError("Please select a file first");
       return;
@@ -69,35 +65,33 @@ export default function Database() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       
-      // Refresh data after successful upload
       await fetchData();
       setFile(null);
     } catch (err) {
-      console.error("Upload failed:", err);
       setError("Upload failed. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
+  }, [file, fetchData]);
 
-  // Clear database (Admin only)
-  const handleClear = async () => {
-    if (!window.confirm("Are you sure you want to clear all data?")) return;
-    
+  const handleClearClick = useCallback(() => {
+    setShowClearModal(true);
+  }, []);
+
+  const handleClearConfirm = useCallback(async () => {
     try {
       setLoading(true);
       await api.delete("/api/uploaded-beneficiaries");
       setData([]);
+      setShowClearModal(false);
     } catch (err) {
-      console.error("Failed to clear data:", err);
       setError("Failed to clear database. Please try again.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Smart upload with duplicate scanning
-  const handleScanUpload = async () => {
+  const handleScanUpload = useCallback(async () => {
     if (!scanFile) {
       setError("Please select a file first");
       return;
@@ -117,16 +111,14 @@ export default function Database() {
       setScanResults(response.data.scanResults);
       setShowScanModal(true);
     } catch (err) {
-      console.error("Scan failed:", err);
       setError("File scan failed. Please try again.");
     } finally {
       setScanning(false);
     }
-  };
+  }, [scanFile]);
 
-  // Upload only new records after confirmation
-  const handleUploadNewRecords = async () => {
-    if (!scanResults || !scanResults.newRecords) return;
+  const handleUploadNewRecords = useCallback(async () => {
+    if (!scanResults?.newRecords) return;
 
     try {
       setUploading(true);
@@ -134,34 +126,29 @@ export default function Database() {
         newRecords: scanResults.newRecords
       });
       
-      // Refresh data and close modal
       await fetchData();
       setShowScanModal(false);
       setScanResults(null);
       setScanFile(null);
       setError("");
     } catch (err) {
-      console.error("Upload failed:", err);
       setError("Upload failed. Please try again.");
     } finally {
       setUploading(false);
     }
-  };
+  }, [scanResults, fetchData]);
 
-  // Close scan modal
-  const handleCloseScanModal = () => {
+  const handleCloseScanModal = useCallback(() => {
     setShowScanModal(false);
     setScanResults(null);
     setScanFile(null);
-  };
+  }, []);
 
-  // Upload selected duplicates (Excel data)
-  const handleUploadSelectedDuplicates = async () => {
+  const handleUploadSelectedDuplicates = useCallback(async () => {
     if (selectedDuplicates.length === 0) return;
 
     const selectedExcelRecords = selectedDuplicates.map(idx => {
       const record = { ...scanResults.duplicates[idx].excel_record };
-      // Append remarks to the record
       record.remarks = duplicateRemarks;
       return record;
     });
@@ -177,21 +164,19 @@ export default function Database() {
       setSelectedDuplicates([]);
       setDuplicateRemarks("");
     } catch (err) {
-      console.error("Upload failed:", err);
       setError("Upload failed. Please try again.");
     } finally {
       setUploading(false);
     }
-  };
+  }, [selectedDuplicates, scanResults, duplicateRemarks, fetchData]);
 
-  // Toggle duplicate selection
-  const toggleDuplicateSelection = (index) => {
+  const toggleDuplicateSelection = useCallback((index) => {
     setSelectedDuplicates(prev => 
       prev.includes(index) 
         ? prev.filter(i => i !== index)
         : [...prev, index]
     );
-  };
+  }, []);
 
   // Filter data based on search term
   const filteredData = useMemo(() => {
@@ -217,17 +202,15 @@ export default function Database() {
     setCurrentPage(1);
   }, [searchTerm]);
 
-  // Format column names for display
-  const formatColumnName = (name) => {
+  const formatColumnName = useCallback((name) => {
     return name
       .split('_')
       .map(word => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
-  };
+  }, []);
 
-  // Simplified pagination - show only current page and nearby pages
-  const getVisiblePages = () => {
-    const delta = 1; // Number of pages to show on each side of current page
+  const getVisiblePages = useMemo(() => {
+    const delta = 1;
     const range = [];
     const rangeWithDots = [];
 
@@ -254,7 +237,7 @@ export default function Database() {
     }
 
     return rangeWithDots;
-  };
+  }, [currentPage, totalPages]);
 
   return (
     <Container fluid className="p-4 flex-grow-1 overflow-auto">
@@ -322,7 +305,7 @@ export default function Database() {
                 </Button>
                 <Button
                   variant="danger"
-                  onClick={handleClear}
+                  onClick={handleClearClick}
                   disabled={loading || data.length === 0}
                   size="sm"
                 >
@@ -399,9 +382,9 @@ export default function Database() {
                     </thead>
                     <tbody>
                       {paginatedData.map((row, rowIdx) => (
-                        <tr key={rowIdx}>
+                        <tr key={`row-${row.id || rowIdx}`}>
                           {columns.map((col, colIdx) => (
-                            <td key={colIdx} className="align-middle">
+                            <td key={`cell-${col.column_name}-${colIdx}`} className="align-middle">
                               {row[col.column_name] !== null ? String(row[col.column_name]) : ''}
                             </td>
                           ))}
@@ -421,9 +404,9 @@ export default function Database() {
                         onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                       />
                       
-                      {getVisiblePages().map((page, idx) => (
+                      {getVisiblePages.map((page, idx) => (
                         <Pagination.Item
-                          key={idx}
+                          key={`page-${page}-${idx}`}
                           active={currentPage === page}
                           onClick={() => typeof page === 'number' && setCurrentPage(page)}
                           disabled={typeof page !== 'number'}
@@ -632,6 +615,25 @@ export default function Database() {
               Upload {selectedDuplicates.length} Excel Records
             </Button>
           )}
+        </Modal.Footer>
+      </Modal>
+
+      {/* Clear Database Confirmation Modal */}
+      <Modal show={showClearModal} onHide={() => setShowClearModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Confirm Clear Database</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          Are you sure you want to clear all data from the database? This action cannot be undone.
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowClearModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={handleClearConfirm} disabled={loading}>
+            {loading ? <Spinner size="sm" animation="border" className="me-1" /> : null}
+            Clear Database
+          </Button>
         </Modal.Footer>
       </Modal>
     </Container>

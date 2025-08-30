@@ -4,6 +4,11 @@ import Sidebar from "../components/Sidebar";
 import Header from "../components/Header";
 import api from "../api/axios";
 
+const t = (key) => {
+  const translations = { loading: "Loading..." };
+  return translations[key] || key;
+};
+
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(true); // sidebar starts collapsed
   const [role, setRole] = useState(null);
@@ -14,7 +19,7 @@ export default function AppLayout() {
     const fetchUser = async () => {
       const token = localStorage.getItem("token");
       if (!token) {
-        navigate("/login"); // redirect to login if no token
+        navigate("/login");
         return;
       }
 
@@ -26,18 +31,18 @@ export default function AppLayout() {
         localStorage.removeItem("token");
         localStorage.removeItem("role");
         localStorage.removeItem("username");
-        navigate("/login"); // go back to login if token invalid
+        navigate("/login");
       } finally {
         setLoading(false);
       }
     };
 
     fetchUser();
-  }, [navigate]);
+  }, []);
 
   if (loading) {
     return <div className="d-flex vh-100 justify-content-center align-items-center">
-      <h4>Loading...</h4>
+      <h4>{t("loading")}</h4>
     </div>;
   }
 

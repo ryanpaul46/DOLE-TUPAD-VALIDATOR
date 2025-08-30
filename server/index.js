@@ -10,6 +10,7 @@ import usersRouter from "./routes/users.js";
 import authRouter from "./routes/auth.js";
 import uploadRoutes from "./routes/upload.js";
 import seedRouter from "./routes/seed.js";
+import { requireAuth } from "./middleware/authMiddleware.js";
 
 // Load environment variables
 dotenv.config();
@@ -38,10 +39,12 @@ app.use(
   })
 );
 
-// Development logging middleware
+// Development logging middleware with input sanitization
 if (process.env.NODE_ENV === 'development' && process.env.VERBOSE_LOGGING === 'true') {
   app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    const sanitizedUrl = encodeURIComponent(req.url).replace(/%/g, '');
+    const sanitizedMethod = req.method.replace(/[^A-Z]/g, '');
+    console.log(`[${new Date().toISOString()}] ${sanitizedMethod} ${sanitizedUrl}`);
     next();
   });
 }
@@ -66,8 +69,14 @@ pool.connect()
     }
   });
 
-// Static file serving for uploads
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+// Static file serving for uploads with path traversal protection
+app.use("/uploads", (req, res, next) => {
+  const requestedPath = path.normalize(req.path);
+  if (requestedPath.includes('..') || path.isAbsolute(requestedPath)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  next();
+}, express.static(path.join(__dirname, "uploads")));
 
 // API routes
 app.use("/auth", authRouter);
@@ -97,9 +106,9 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// Development routes
+// Development routes with authentication
 if (process.env.NODE_ENV === 'development') {
-  app.get("/dev/info", (req, res) => {
+  app.get("/dev/info", requireAuth, (req, res) => {
     res.json({
       environment: process.env.NODE_ENV,
       port: process.env.PORT,

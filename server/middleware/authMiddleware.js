@@ -11,11 +11,15 @@ export const requireAuth = (req, res, next) => {
   const token = authHeader.split(" ")[1];
 
   try {
+    if (!process.env.JWT_SECRET) {
+      throw new Error('JWT_SECRET environment variable is not configured');
+    }
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded; // { id, username, role }
     next();
   } catch (err) {
-    console.error("JWT verification error:", err.message);
+    const sanitizedError = err.message.replace(/[\r\n\t]/g, '');
+    console.error("JWT verification error:", sanitizedError);
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };

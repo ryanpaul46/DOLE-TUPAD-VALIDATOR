@@ -3,6 +3,8 @@ import { pool } from "../db.js";
 import { Transform } from "stream";
 import { pipeline } from "stream/promises";
 import cacheService from "./cacheService.js";
+import path from "path";
+import fs from "fs";
 
 // Configuration for chunked processing
 const CHUNK_SIZE = 1000; // Process 1000 rows at a time
@@ -16,15 +18,55 @@ export class OptimizedUploadService {
       duplicatesFound: 0,
       errorsFound: 0
     };
+    this.allowedUploadDir = path.resolve('./uploads');
+  }
+
+  /**
+   * Validate user authorization for service operations
+   */
+  validateAuthorization(user) {
+    if (!user || !user.id) {
+      throw new Error('Unauthorized: User authentication required');
+    }
+    
+    if (!user.role || (user.role !== 'admin' && user.role !== 'user')) {
+      throw new Error('Unauthorized: Insufficient permissions');
+    }
+    
+    return true;
+  }
+
+  /**
+   * Validate file path to prevent path traversal attacks
+   */
+  validateFilePath(filePath) {
+    if (!filePath || typeof filePath !== 'string') {
+      throw new Error('Invalid file path');
+    }
+    
+    const normalizedPath = path.normalize(filePath);
+    const resolvedPath = path.resolve(normalizedPath);
+    
+    if (!resolvedPath.startsWith(this.allowedUploadDir)) {
+      throw new Error('Access denied: Path outside allowed directory');
+    }
+    
+    if (!fs.existsSync(resolvedPath)) {
+      throw new Error('File does not exist');
+    }
+    
+    return resolvedPath;
   }
 
   /**
    * Process Excel file in chunks for better memory management
    */
-  async processExcelInChunks(filePath, progressCallback = null) {
+  async processExcelInChunks(filePath, progressCallback = null, user = null) {
     try {
+      this.validateAuthorization(user);
+      const validatedPath = this.validateFilePath(filePath);
       console.log('📊 Starting optimized Excel processing...');
-      const workbook = XLSX.readFile(filePath);
+      const workbook = XLSX.readFile(validatedPath);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const range = XLSX.utils.decode_range(sheet['!ref']);
       
@@ -62,7 +104,9 @@ export class OptimizedUploadService {
         await new Promise(resolve => setImmediate(resolve));
       }
 
-      console.log(`✅ Processing completed: ${this.processingStats.processedRows} rows, ${this.processingStats.duplicatesFound} duplicates found`);
+      const sanitizedRows = String(this.processingStats.processedRows).replace(/[\r\n\t]/g, '');
+      const sanitizedDuplicates = String(this.processingStats.duplicatesFound).replace(/[\r\n\t]/g, '');
+      console.log(`✅ Processing completed: ${sanitizedRows} rows, ${sanitizedDuplicates} duplicates found`);
       return {
         ...results,
         totalExcelRows: this.processingStats.totalRows,
@@ -87,7 +131,8 @@ export class OptimizedUploadService {
       const cachedMap = await cacheService.getCachedNameLookup();
       
       if (cachedMap && cachedMap.size > 0) {
-        console.log(`📋 Using cached lookup map with ${cachedMap.size} records`);
+        const sanitizedSize = String(cachedMap.size).replace(/[\r\n\t]/g, '');
+        console.log(`📋 Using cached lookup map with ${sanitizedSize} records`);
         return cachedMap;
       }
 
@@ -110,7 +155,8 @@ export class OptimizedUploadService {
       // Cache the result for future use
       await cacheService.cacheNameLookup(nameMap);
       
-      console.log(`📋 Created and cached lookup map with ${nameMap.size} existing records`);
+      const sanitizedMapSize = String(nameMap.size).replace(/[\r\n\t]/g, '');
+      console.log(`📋 Created and cached lookup map with ${sanitizedMapSize} existing records`);
       return nameMap;
     } catch (error) {
       console.error('❌ Error creating name lookup map:', error);
@@ -172,24 +218,31 @@ export class OptimizedUploadService {
   }
 
   /**
+   * Sanitize input to prevent injection attacks
+   */
+  sanitizeInput(input) {
+    if (!input || typeof input !== 'string') return '';
+    return input.toString().trim().replace(/[\r\n\t\x00-\x1f\x7f-\x9f]/g, '');
+  }
+
+  /**
    * Extract and normalize name from Excel row
    */
   extractName(row) {
-    // Create concatenated name from individual components
+    // Create concatenated name from individual components with sanitization
     const nameParts = [
-      row["First Name"]?.toString().trim(),
-      row["Middle Name"]?.toString().trim(),
-      row["Last Name"]?.toString().trim(),
-      row["Ext. Name"]?.toString().trim()
+      this.sanitizeInput(row["First Name"]),
+      this.sanitizeInput(row["Middle Name"]),
+      this.sanitizeInput(row["Last Name"]),
+      this.sanitizeInput(row["Ext. Name"])
     ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
     
     const concatenatedName = nameParts.join(' ');
     
     // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
-    const finalName = (row["Name"]?.toString().trim() &&
-                      row["Name"].toString().trim() !== 'null' &&
-                      row["Name"].toString().trim() !== 'undefined')
-                     ? row["Name"].toString().trim()
+    const nameField = this.sanitizeInput(row["Name"]);
+    const finalName = (nameField && nameField !== 'null' && nameField !== 'undefined')
+                     ? nameField
                      : concatenatedName;
 
     return finalName;
@@ -198,12 +251,15 @@ export class OptimizedUploadService {
   /**
    * Batch insert new records with optimized performance
    */
-  async batchInsertRecords(records, progressCallback = null) {
+  async batchInsertRecords(records, progressCallback = null, user = null) {
+    this.validateAuthorization(user);
+    
     if (!records || records.length === 0) {
       return { success: true, insertedCount: 0 };
     }
 
-    console.log(`📝 Starting batch insert of ${records.length} records...`);
+    const sanitizedLength = String(records.length).replace(/[\r\n\t]/g, '');
+    console.log(`📝 Starting batch insert of ${sanitizedLength} records...`);
     const BATCH_SIZE = 500; // Insert 500 records at a time
     let insertedCount = 0;
 
@@ -230,27 +286,27 @@ export class OptimizedUploadService {
           const finalName = this.extractName(row);
           
           const rowValues = [
-            row["Project Series"] || null,
-            row["ID Number"] || null,
+            this.sanitizeInput(row["Project Series"]) || null,
+            this.sanitizeInput(row["ID Number"]) || null,
             finalName,
-            row["First Name"] || null,
-            row["Middle Name"] || null,
-            row["Last Name"] || null,
-            row["Ext. Name"] || null,
+            this.sanitizeInput(row["First Name"]) || null,
+            this.sanitizeInput(row["Middle Name"]) || null,
+            this.sanitizeInput(row["Last Name"]) || null,
+            this.sanitizeInput(row["Ext. Name"]) || null,
             row["Birthdate"] ? new Date(row["Birthdate"]) : null,
-            row["Barangay"] || null,
-            row["City Municipality"] || null,
-            row["Province"] || null,
-            row["District"] || null,
-            row["Type of ID"] || null,
-            row["ID No."] || null,
-            row["Contact No."] || null,
-            row["Type of Beneficiary"] || null,
-            row["Occupation"] || null,
-            row["Sex"] || null,
-            row["Civil Status"] || null,
+            this.sanitizeInput(row["Barangay"]) || null,
+            this.sanitizeInput(row["City Municipality"]) || null,
+            this.sanitizeInput(row["Province"]) || null,
+            this.sanitizeInput(row["District"]) || null,
+            this.sanitizeInput(row["Type of ID"]) || null,
+            this.sanitizeInput(row["ID No."]) || null,
+            this.sanitizeInput(row["Contact No."]) || null,
+            this.sanitizeInput(row["Type of Beneficiary"]) || null,
+            this.sanitizeInput(row["Occupation"]) || null,
+            this.sanitizeInput(row["Sex"]) || null,
+            this.sanitizeInput(row["Civil Status"]) || null,
             row["Age"] ? parseInt(row["Age"]) : null,
-            row["Dependent"] || null
+            this.sanitizeInput(row["Dependent"]) || null
           ];
 
           values.push(...rowValues);
@@ -276,7 +332,8 @@ export class OptimizedUploadService {
         await new Promise(resolve => setImmediate(resolve));
       }
 
-      console.log(`✅ Batch insert completed: ${insertedCount} records inserted`);
+      const sanitizedInsertedCount = String(insertedCount).replace(/[\r\n\t]/g, '');
+      console.log(`✅ Batch insert completed: ${sanitizedInsertedCount} records inserted`);
       return { success: true, insertedCount };
 
     } catch (error) {
@@ -289,6 +346,7 @@ export class OptimizedUploadService {
    * Stream processing for very large files
    */
   async streamProcessFile(filePath, progressCallback = null) {
+    const validatedPath = this.validateFilePath(filePath);
     const results = { duplicates: [], originals: [], errors: [] };
     let rowCount = 0;
 
@@ -332,7 +390,7 @@ export class OptimizedUploadService {
 
       // Process the file using streaming
       await pipeline(
-        this.createExcelReadStream(filePath),
+        this.createExcelReadStream(validatedPath),
         processRowTransform
       );
 
@@ -362,10 +420,10 @@ export class OptimizedUploadService {
         return cached.isDuplicate ? cached.record : null;
       }
 
-      // If not in cache, query database
+      // If not in cache, query database with parameterized query
       const result = await pool.query(
         'SELECT * FROM uploaded_beneficiaries WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) LIMIT 1',
-        [name]
+        [normalizedName]
       );
       
       const isDuplicate = result.rows.length > 0;
@@ -385,6 +443,8 @@ export class OptimizedUploadService {
    * Create a readable stream from Excel file
    */
   createExcelReadStream(filePath) {
+    // Validate path before processing
+    const validatedPath = this.validateFilePath(filePath);
     // This would be implemented with a proper Excel streaming library
     // For now, we'll use the chunked approach
     throw new Error('Stream processing not yet implemented - use processExcelInChunks instead');

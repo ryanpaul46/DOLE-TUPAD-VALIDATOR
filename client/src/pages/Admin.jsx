@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Container, Row, Col, Button, Spinner, Alert, Card, Badge, ProgressBar } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import { People, FileEarmark, GeoAlt, Calendar, PieChart, BarChart } from "react-bootstrap-icons";
@@ -12,7 +12,15 @@ export default function Admin() {
   const [statsLoading, setStatsLoading] = useState(true);
   const navigate = useNavigate();
 
-  const fetchAdminInfo = async () => {
+  const clearStorage = useCallback(() => {
+    try {
+      localStorage.clear();
+    } catch (error) {
+      // Silently handle localStorage errors
+    }
+  }, []);
+
+  const fetchAdminInfo = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -22,30 +30,34 @@ export default function Admin() {
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch admin info.");
       if (err.response?.status === 401) {
-        localStorage.clear();
+        clearStorage();
         navigate("/login", { replace: true });
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate, clearStorage]);
 
-  const fetchStatistics = async () => {
+  const fetchStatistics = useCallback(async () => {
     try {
       setStatsLoading(true);
       const res = await api.get("/api/admin-statistics");
       setStatistics(res.data);
     } catch (err) {
-      console.error("Failed to fetch statistics:", err);
+      // Statistics fetch failed - handled silently
     } finally {
       setStatsLoading(false);
     }
-  };
+  }, []);
+
+  const handleNavigation = useCallback((path) => {
+    navigate(path);
+  }, [navigate]);
 
   useEffect(() => {
     fetchAdminInfo();
     fetchStatistics();
-  }, []);
+  }, [fetchAdminInfo, fetchStatistics]);
 
   if (loading) return <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}><Spinner animation="border" /></Container>;
 
@@ -125,14 +137,14 @@ export default function Admin() {
               ) : (
                 <div>
                   {statistics?.projectSeries?.slice(0, 5).map((item, idx) => {
-                    const percentage = statistics.totalBeneficiaries > 0
+                    const percentage = (statistics?.totalBeneficiaries || 0) > 0
                       ? (item.count / statistics.totalBeneficiaries * 100)
                       : 0;
                     return (
-                      <div key={idx} className="mb-3">
+                      <div key={`project-${item.project_series || idx}`} className="mb-3">
                         <div className="d-flex justify-content-between mb-1">
                           <small className="fw-bold">{item.project_series || 'Unknown'}</small>
-                          <Badge bg="primary">{item.count.toLocaleString()}</Badge>
+                          <Badge bg="primary">{item.count?.toLocaleString() || 0}</Badge>
                         </div>
                         <ProgressBar
                           now={percentage}
@@ -162,14 +174,14 @@ export default function Admin() {
               ) : (
                 <div>
                   {statistics?.provinces?.slice(0, 5).map((item, idx) => {
-                    const percentage = statistics.totalBeneficiaries > 0
+                    const percentage = (statistics?.totalBeneficiaries || 0) > 0
                       ? (item.count / statistics.totalBeneficiaries * 100)
                       : 0;
                     return (
-                      <div key={idx} className="mb-3">
+                      <div key={`province-${item.province || idx}`} className="mb-3">
                         <div className="d-flex justify-content-between mb-1">
                           <small className="fw-bold">{item.province || 'Unknown'}</small>
-                          <Badge bg="info">{item.count.toLocaleString()}</Badge>
+                          <Badge bg="info">{item.count?.toLocaleString() || 0}</Badge>
                         </div>
                         <ProgressBar
                           now={percentage}
@@ -200,14 +212,18 @@ export default function Admin() {
                 </div>
               ) : (
                 <Row>
-                  {statistics?.genderDistribution?.map((item, idx) => (
-                    <Col md={6} key={idx} className="text-center mb-3">
-                      <h4 className={idx === 0 ? "text-primary" : "text-success"}>
-                        {item.count.toLocaleString()}
-                      </h4>
-                      <small className="text-muted">{item.sex || 'Unknown'}</small>
-                    </Col>
-                  ))}
+                  {statistics?.genderDistribution?.map((item) => {
+                    const colorClass = item.sex === 'Male' ? 'text-primary' : 
+                                     item.sex === 'Female' ? 'text-success' : 'text-secondary';
+                    return (
+                      <Col md={6} key={`gender-${item.sex || 'unknown'}`} className="text-center mb-3">
+                        <h4 className={colorClass}>
+                          {item.count?.toLocaleString() || 0}
+                        </h4>
+                        <small className="text-muted">{item.sex || 'Unknown'}</small>
+                      </Col>
+                    );
+                  })}
                 </Row>
               )}
             </Card.Body>
@@ -249,26 +265,37 @@ export default function Admin() {
 
       {/* Action Buttons */}
       <Row>
-        <Col md={6} className="mb-3">
+        <Col md={4} className="mb-3">
           <Button
             variant="primary"
             size="lg"
             className="w-100"
-            onClick={() => navigate("/admin/users")}
+            onClick={() => handleNavigation("/admin/users")}
           >
             <People className="me-2" />
             Manage Users
           </Button>
         </Col>
-        <Col md={6} className="mb-3">
+        <Col md={4} className="mb-3">
           <Button
             variant="secondary"
             size="lg"
             className="w-100"
-            onClick={() => navigate("/admin/database")}
+            onClick={() => handleNavigation("/admin/database")}
           >
             <FileEarmark className="me-2" />
             View Database
+          </Button>
+        </Col>
+        <Col md={4} className="mb-3">
+          <Button
+            variant="info"
+            size="lg"
+            className="w-100"
+            onClick={() => handleNavigation("/admin/duplicate-detection")}
+          >
+            <BarChart className="me-2" />
+            Duplicate Analysis
           </Button>
         </Col>
       </Row>

@@ -3,6 +3,29 @@ import pg from "pg";
 import dotenv from "dotenv";
 dotenv.config();
 
+// Security utility to sanitize inputs for logging
+const sanitizeForLog = (input) => {
+  if (!input || typeof input !== 'string') return String(input || '');
+  return input.toString().replace(/[\r\n\t\x00-\x1f\x7f-\x9f]/g, '').substring(0, 100);
+};
+
+// Validate database access permissions
+const validateDatabaseAccess = () => {
+  const requiredEnvVars = ['PGHOST', 'PGDATABASE', 'PGUSER'];
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+  
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required database environment variables: ${missingVars.join(', ')}`);
+  }
+  
+  // Validate database configuration in production
+  if (process.env.NODE_ENV === 'production') {
+    if (!process.env.DATABASE_URL && !process.env.PGPASSWORD) {
+      throw new Error('Database authentication required in production');
+    }
+  }
+};
+
 const { Pool } = pg;
 
 // Enhanced PostgreSQL configuration for local development
@@ -38,12 +61,15 @@ const getDatabaseConfig = () => {
     // Development specific settings
     ssl: false, // Disable SSL for local development
     
-    // Enhanced logging for development
+    // Enhanced logging for development with sanitization
     ...(process.env.DEBUG === 'true' && {
-      log: (msg) => console.log('📊 Database:', msg)
+      log: (msg) => console.log('📊 Database:', sanitizeForLog(msg))
     })
   };
 };
+
+// Validate database access before creating pool
+validateDatabaseAccess();
 
 const pool = new Pool(getDatabaseConfig());
 
@@ -55,9 +81,9 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database error:', err.message);
+  console.error('❌ Unexpected database error:', sanitizeForLog(err.message));
   if (process.env.DEBUG === 'true') {
-    console.error('Full error details:', err);
+    console.error('Full error details:', sanitizeForLog(JSON.stringify(err, null, 2)));
   }
 });
 
@@ -87,9 +113,11 @@ const verifyDatabaseTables = async () => {
       const userCount = await pool.query('SELECT COUNT(*) FROM users');
       const beneficiaryCount = await pool.query('SELECT COUNT(*) FROM uploaded_beneficiaries');
       
+      const sanitizedUserCount = sanitizeForLog(userCount.rows[0].count);
+      const sanitizedBeneficiaryCount = sanitizeForLog(beneficiaryCount.rows[0].count);
       console.log(`📊 Database Status:
-        - Users: ${userCount.rows[0].count} records
-        - Beneficiaries: ${beneficiaryCount.rows[0].count} records`);
+        - Users: ${sanitizedUserCount} records
+        - Beneficiaries: ${sanitizedBeneficiaryCount} records`);
       
       // Create enhanced indexes for performance optimization
       const indexes = [
@@ -122,7 +150,7 @@ const verifyDatabaseTables = async () => {
         } catch (err) {
           // Ignore duplicate key errors for indexes and already exists errors
           if (err.code !== '23505' && !err.message.includes('already exists')) {
-            console.warn(`⚠️ Index creation warning: ${err.message}`);
+            console.warn(`⚠️ Index creation warning: ${sanitizeForLog(err.message)}`);
           }
         }
       }
@@ -131,7 +159,7 @@ const verifyDatabaseTables = async () => {
       
     } else {
       console.warn('⚠️ Required tables not found. Expected: users, uploaded_beneficiaries');
-      console.log('📋 Available tables:', existingTables);
+      console.log('📋 Available tables:', existingTables.map(sanitizeForLog));
       
       // Create missing tables if needed
       if (!existingTables.includes('users')) {
@@ -187,9 +215,9 @@ const verifyDatabaseTables = async () => {
       console.log('✅ Database verification completed');
     }
   } catch (err) {
-    console.error('❌ Database verification error:', err.message);
+    console.error('❌ Database verification error:', sanitizeForLog(err.message));
     if (process.env.DEBUG === 'true') {
-      console.error('Full verification error:', err);
+      console.error('Full verification error:', sanitizeForLog(JSON.stringify(err, null, 2)));
     }
   }
 };
@@ -201,20 +229,20 @@ pool.connect()
     console.log(`✅ Connected to ${process.env.NODE_ENV === 'production' ? 'production' : 'local PostgreSQL'} database`);
     
     if (process.env.NODE_ENV === 'development') {
-      console.log(`📅 Database time: ${result.rows[0].now}`);
+      console.log(`📅 Database time: ${sanitizeForLog(result.rows[0].now)}`);
       await verifyDatabaseTables();
     }
     
     client.release();
   })
   .catch(err => {
-    console.error("❌ Database connection error:", err.message);
+    console.error("❌ Database connection error:", sanitizeForLog(err.message));
     if (process.env.DEBUG === 'true') {
       console.error("Connection details:", {
-        host: process.env.PGHOST,
-        port: process.env.PGPORT,
-        database: process.env.PGDATABASE,
-        user: process.env.PGUSER
+        host: sanitizeForLog(process.env.PGHOST),
+        port: sanitizeForLog(process.env.PGPORT),
+        database: sanitizeForLog(process.env.PGDATABASE),
+        user: sanitizeForLog(process.env.PGUSER)
       });
     }
   });
