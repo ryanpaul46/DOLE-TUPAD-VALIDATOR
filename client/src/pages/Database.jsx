@@ -22,8 +22,11 @@ export default function Database() {
   const [scanFile, setScanFile] = useState(null);
   const [scanResults, setScanResults] = useState(null);
   const [showScanModal, setShowScanModal] = useState(false);
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [selectedDuplicates, setSelectedDuplicates] = useState([]);
+  const [duplicateRemarks, setDuplicateRemarks] = useState("");
 
   // Fetch data and column information
   const fetchData = async () => {
@@ -150,6 +153,44 @@ export default function Database() {
     setShowScanModal(false);
     setScanResults(null);
     setScanFile(null);
+  };
+
+  // Upload selected duplicates (Excel data)
+  const handleUploadSelectedDuplicates = async () => {
+    if (selectedDuplicates.length === 0) return;
+
+    const selectedExcelRecords = selectedDuplicates.map(idx => {
+      const record = { ...scanResults.duplicates[idx].excel_record };
+      // Append remarks to the record
+      record.remarks = duplicateRemarks;
+      return record;
+    });
+
+    try {
+      setUploading(true);
+      await api.post("/api/upload-new-records", {
+        newRecords: selectedExcelRecords
+      });
+      
+      await fetchData();
+      setShowDuplicatesModal(false);
+      setSelectedDuplicates([]);
+      setDuplicateRemarks("");
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setError("Upload failed. Please try again.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Toggle duplicate selection
+  const toggleDuplicateSelection = (index) => {
+    setSelectedDuplicates(prev => 
+      prev.includes(index) 
+        ? prev.filter(i => i !== index)
+        : [...prev, index]
+    );
   };
 
   // Filter data based on search term
@@ -449,6 +490,14 @@ export default function Database() {
                 <Alert variant="warning">
                   <ExclamationTriangle size={16} className="me-1" />
                   <strong>Duplicates Found:</strong> {scanResults.duplicatesFound} records already exist in the database and will be skipped.
+                  <Button 
+                    variant="link" 
+                    size="sm" 
+                    onClick={() => setShowDuplicatesModal(true)}
+                    className="p-0 ms-2"
+                  >
+                    View Names
+                  </Button>
                 </Alert>
               )}
 
@@ -513,6 +562,74 @@ export default function Database() {
             >
               {uploading ? <Spinner size="sm" animation="border" className="me-1" /> : null}
               Upload {scanResults.newRecordsFound} New Records
+            </Button>
+          )}
+        </Modal.Footer>
+      </Modal>
+
+      {/* Duplicate Names Modal */}
+      <Modal show={showDuplicatesModal} onHide={() => setShowDuplicatesModal(false)} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Select Excel Records to Upload</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Alert variant="info" className="mb-3">
+            Select Excel records you want to upload despite being duplicates. The checkbox selects the Excel data for upload.
+          </Alert>
+          
+          <div className="mb-3">
+            <Form.Group>
+              <Form.Label>Remarks</Form.Label>
+              <Form.Control
+                as="textarea"
+                rows={2}
+                value={duplicateRemarks}
+                onChange={(e) => setDuplicateRemarks(e.target.value)}
+                placeholder="Add remarks for selected Excel records..."
+              />
+            </Form.Group>
+          </div>
+          
+          {scanResults?.duplicates?.map((dup, idx) => {
+            const dbName = dup.database_record?.name || 
+              [dup.database_record?.first_name, dup.database_record?.middle_name, dup.database_record?.last_name, dup.database_record?.ext_name]
+                .filter(Boolean).join(' ');
+            const excelName = dup.excel_record?.finalName || dup.excel_record?.Name || 
+              [dup.excel_record?.['First Name'], dup.excel_record?.['Middle Name'], dup.excel_record?.['Last Name'], dup.excel_record?.['Ext. Name']]
+                .filter(Boolean).join(' ');
+            return (
+              <div key={idx} className="mb-3 p-3 border rounded">
+                <div className="d-flex align-items-start">
+                  <Form.Check
+                    type="checkbox"
+                    checked={selectedDuplicates.includes(idx)}
+                    onChange={() => toggleDuplicateSelection(idx)}
+                    className="me-3 mt-1"
+                    title="Select this Excel record for upload"
+                  />
+                  <div className="flex-grow-1">
+                    <div className="text-muted small">Existing in Database:</div>
+                    <div className="fw-bold text-info mb-2">{dbName}</div>
+                    <div className="text-muted small">From Excel (will be uploaded if selected):</div>
+                    <div className="fw-bold text-warning">{excelName}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowDuplicatesModal(false)}>
+            Close
+          </Button>
+          {selectedDuplicates.length > 0 && (
+            <Button
+              variant="primary"
+              onClick={handleUploadSelectedDuplicates}
+              disabled={uploading}
+            >
+              {uploading ? <Spinner size="sm" animation="border" className="me-1" /> : null}
+              Upload {selectedDuplicates.length} Excel Records
             </Button>
           )}
         </Modal.Footer>

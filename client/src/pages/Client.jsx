@@ -6,7 +6,7 @@ export default function ClientDatabase() {
   const [data, setData] = useState([]);
   const [uniqueCounts, setUniqueCounts] = useState({
     total_unique_municipalities: 0,
-    total_unique_provinces: 0
+    total_unique_barangay: 0
   });
 
   const fetchData = async () => {
@@ -59,8 +59,8 @@ export default function ClientDatabase() {
         <Col md={3}>
           <Card className="text-center">
             <Card.Body>
-              <Card.Title>Provinces</Card.Title>
-              <Card.Text className="display-4">{uniqueCounts.total_unique_provinces}</Card.Text>
+              <Card.Title>Barangays</Card.Title>
+              <Card.Text className="display-4">{uniqueCounts.total_unique_barangay}</Card.Text>
             </Card.Body>
           </Card>
         </Col>
@@ -74,7 +74,7 @@ export default function ClientDatabase() {
               <th>Project Series</th>
               <th>Number of Beneficiaries</th>
               <th>Municipalities Covered</th>
-              <th>Provinces Covered</th>
+              <th>Barangays Covered</th>
             </tr>
           </thead>
           <tbody>
@@ -83,7 +83,7 @@ export default function ClientDatabase() {
                 <td>{item.project_series}</td>
                 <td>{item.beneficiary_count}</td>
                 <td>{item.municipality_count}</td>
-                <td>{item.province_count}</td>
+                <td>{item.total_unique_barangay}</td>
               </tr>
             ))}
           </tbody>

@@ -1,6 +1,6 @@
 import express from "express";
 import multer from "multer";
-import path from "path";
+import path, { parse } from "path";
 import XLSX from "xlsx";
 import { pool } from "../db.js";
 import { OptimizedUploadService } from "../services/optimizedUploadService.js";
@@ -301,7 +301,8 @@ router.get("/beneficiaries-by-project-series", async (req, res) => {
         project_series,
         COUNT(*) as beneficiary_count,
         COUNT(DISTINCT city_municipality) as municipality_count,
-        COUNT(DISTINCT province) as province_count
+        COUNT(DISTINCT province) as province_count,
+        COUNT(DISTINCT barangay) as total_unique_barangay
       FROM uploaded_beneficiaries
       WHERE project_series IS NOT NULL
       GROUP BY project_series
@@ -312,7 +313,7 @@ router.get("/beneficiaries-by-project-series", async (req, res) => {
     const uniqueCountsResult = await pool.query(`
       SELECT
         COUNT(DISTINCT city_municipality) as total_unique_municipalities,
-        COUNT(DISTINCT province) as total_unique_provinces
+        COUNT(DISTINCT barangay) as total_unique_barangay
       FROM uploaded_beneficiaries
       WHERE project_series IS NOT NULL
     `);
@@ -515,6 +516,14 @@ router.get("/admin-statistics", async (req, res) => {
       WHERE project_series IS NOT NULL AND project_series != ''
     `);
 
+
+    // Records by barangay
+    const totalBarangayResult = await pool.query(`
+     SELECT COUNT(DISTINCT barangay) as total_unique_barangays
+     FROM uploaded_beneficiaries
+     WHERE barangay IS NOT NULL AND barangay != ''
+    `);
+
     // Records by province
     const provinceResult = await pool.query(`
       SELECT
@@ -584,7 +593,8 @@ router.get("/admin-statistics", async (req, res) => {
       cities: cityResult.rows,
       genderDistribution: genderResult.rows,
       ageStats: ageStatsResult.rows[0],
-      beneficiaryTypes: beneficiaryTypeResult.rows
+      beneficiaryTypes: beneficiaryTypeResult.rows,
+      totalBarangays: parseInt(totalBarangayResult.rows[0].total_unique_barangays),
     });
 
   } catch (err) {

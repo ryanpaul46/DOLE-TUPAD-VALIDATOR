@@ -1,4 +1,4 @@
-import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col } from "react-bootstrap";
+import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col, Modal } from "react-bootstrap";
 import { useState, useCallback, useMemo } from "react";
 import { Download } from "react-bootstrap-icons";
 import * as XLSX from "xlsx";
@@ -13,13 +13,10 @@ export default function DetectDuplicate() {
   const [error, setError] = useState("");
   const [compareResult, setCompareResult] = useState(null);
   const [useOptimized, setUseOptimized] = useState(false);
-  const [progress, setProgress] = useState({
-    status: 'idle',
-    processed: 0,
-    total: 0,
-    duplicatesFound: 0,
-    percentage: 0
-  });
+  const [progress, setProgress] = useState({ status: 'idle', processed: 0, total: 0, duplicatesFound: 0, percentage: 0 });
+  const [selectedDuplicates, setSelectedDuplicates] = useState([]);
+  const [remarks, setRemarks] = useState("");
+  const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
 
@@ -82,7 +79,7 @@ export default function DetectDuplicate() {
       
       // Check if we need to use optimized processing
       if (res.data.shouldUseOptimized) {
-        console.log(`Large file detected (${res.data.fileSize} rows). Switching to optimized processing...`);
+        console.log('Large file detected. Switching to optimized processing...');
         setUseOptimized(true);
         
         // Update progress for large file processing
@@ -136,6 +133,10 @@ export default function DetectDuplicate() {
 
     try {
       await api.post("/api/upload-excel", formData, {
+        params: {
+          selectedDuplicates: selectedDuplicates.map(d => d.id),
+          remarks: remarks
+        },
         headers: {
           "Content-Type": "multipart/form-data",
         },
@@ -147,8 +148,8 @@ export default function DetectDuplicate() {
       const res = await api.get("/api/uploaded-beneficiaries");
       setBeneficiaries(res.data);
     } catch (err) {
-      console.error("Upload failed:", err);
-      alert("Upload failed. Check console for details.");
+      console.error("Upload failed:");
+      alert("Upload failed. Please try again.");
     }
   };
 
@@ -484,7 +485,19 @@ export default function DetectDuplicate() {
             <Card.Header>Comparison Summary</Card.Header>
             <Card.Body>
               <p>Total rows in Excel file: {compareResult.totalExcelRows}</p>
-              <p className="text-danger">Duplicate rows found: {compareResult.totalDuplicates}</p>
+              <p className="text-danger">
+                Duplicate rows found: {compareResult.totalDuplicates}
+                {compareResult.totalDuplicates > 0 && (
+                  <Button 
+                    variant="link" 
+                    size="sm" 
+                    onClick={() => setShowDuplicatesModal(true)}
+                    className="p-0 ms-2"
+                  >
+                    View Names
+                  </Button>
+                )}
+              </p>
               <p className="text-success">Original rows: {compareResult.totalOriginals}</p>
             </Card.Body>
           </Card>
@@ -551,37 +564,30 @@ export default function DetectDuplicate() {
         </>
       )}
 
-      {/* Uploaded Data */}
-      {beneficiaries.length > 0 && (
-        <Card>
-          <Card.Header>Uploaded Data - {beneficiaries.length} records</Card.Header>
-          <Card.Body className="p-0">
-            <VirtualizedTable
-              data={beneficiaries}
-              headers={[
-                { key: 'project_series', label: 'Project Series', width: 150 },
-                { key: 'id_number', label: 'ID Number', width: 120 },
-                { key: 'name', label: 'Name', width: 200 },
-                { key: 'first_name', label: 'First Name', width: 150 },
-                { key: 'last_name', label: 'Last Name', width: 150 },
-                { key: 'barangay', label: 'Barangay', width: 150 },
-                { key: 'city_municipality', label: 'City', width: 150 },
-                { key: 'province', label: 'Province', width: 150 }
-              ]}
-              height={400}
-              rowHeight={45}
-              renderCell={(rowData, header, rowIndex, cellIndex) => {
-                if (header.key === 'name') {
-                  return <span title={getDisplayName(rowData)}>{getDisplayName(rowData)}</span>;
-                }
-                const value = rowData[header.key] || '';
-                return <span title={value}>{value}</span>;
-              }}
-              className="border-0"
-            />
-          </Card.Body>
-        </Card>
-      )}
+
+      {/* Duplicate Names Modal */}
+      <Modal show={showDuplicatesModal} onHide={() => setShowDuplicatesModal(false)} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Duplicate Names Found</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {compareResult?.duplicates?.map((dup, idx) => {
+            const dbName = getDisplayName(dup.database_record);
+            const excelName = getUniformValue(dup.excel_row.data, { key: 'name', excelKey: 'Name' }, true);
+            return (
+              <div key={idx} className="mb-3 p-3 border rounded">
+                <div className="fw-bold text-info">Database: {dbName}</div>
+                <div className="fw-bold text-warning">Excel: {excelName}</div>
+              </div>
+            );
+          })}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowDuplicatesModal(false)}>
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </Container>
   );
 }
