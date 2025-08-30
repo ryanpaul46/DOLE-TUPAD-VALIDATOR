@@ -2,6 +2,8 @@ import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col, Modal }
 import { useState, useCallback, useMemo } from "react";
 import { Download } from "react-bootstrap-icons";
 import * as XLSX from "xlsx";
+import Fuse from "fuse.js";
+import stringSimilarity from "string-similarity";
 import api from "../api/axios";
 import VirtualizedTable from "../components/VirtualizedTable";
 import ProgressTracker from "../components/ProgressTracker";
@@ -17,6 +19,8 @@ export default function DetectDuplicate() {
   const [selectedDuplicates, setSelectedDuplicates] = useState([]);
   const [remarks, setRemarks] = useState("");
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filteredDuplicates, setFilteredDuplicates] = useState([]);
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
 
@@ -102,6 +106,7 @@ export default function DetectDuplicate() {
           duplicatesFound: optimizedRes.data.totalDuplicates,
           percentage: 100
         });
+        setFilteredDuplicates(optimizedRes.data.duplicates || []);
       } else {
         // Regular processing for small files
         setCompareResult(res.data);
@@ -112,6 +117,7 @@ export default function DetectDuplicate() {
           duplicatesFound: res.data.totalDuplicates,
           percentage: 100
         });
+        setFilteredDuplicates(res.data.duplicates || []);
       }
     } catch (err) {
       console.error("Compare failed:", err);
@@ -158,6 +164,8 @@ export default function DetectDuplicate() {
     setCompareResult(null);
     setError("");
     setUseOptimized(false);
+    setSearchTerm("");
+    setFilteredDuplicates([]);
     setProgress({
       status: 'idle',
       processed: 0,
@@ -288,6 +296,42 @@ export default function DetectDuplicate() {
     return dbValue !== excelValue;
   };
 
+  // Calculate string similarity percentage
+  const getStringSimilarity = (str1, str2) => {
+    if (!str1 || !str2) return 0;
+    return Math.round(stringSimilarity.compareTwoStrings(str1, str2) * 100);
+  };
+
+  // Fuzzy search using fuse.js
+  const fuseSearch = useMemo(() => {
+    if (!compareResult?.duplicates) return null;
+    
+    const searchData = compareResult.duplicates.map((dup, idx) => ({
+      id: idx,
+      dbName: getDisplayName(dup.database_record),
+      excelName: getUniformValue(dup.excel_row.data, { key: 'name', excelKey: 'Name' }, true),
+      duplicate: dup
+    }));
+    
+    return new Fuse(searchData, {
+      keys: ['dbName', 'excelName'],
+      threshold: 0.3,
+      includeScore: true
+    });
+  }, [compareResult]);
+
+  // Filter duplicates based on search term
+  const handleSearch = useCallback((term) => {
+    setSearchTerm(term);
+    if (!term.trim() || !fuseSearch) {
+      setFilteredDuplicates(compareResult?.duplicates || []);
+      return;
+    }
+    
+    const results = fuseSearch.search(term);
+    setFilteredDuplicates(results.map(result => result.item.duplicate));
+  }, [fuseSearch, compareResult]);
+
   // Function to download duplicate comparison data as Excel
   const downloadDuplicatesAsExcel = () => {
     if (!compareResult || compareResult.duplicates.length === 0) {
@@ -345,8 +389,9 @@ export default function DetectDuplicate() {
   const duplicateTableData = useMemo(() => {
     if (!compareResult || !compareResult.duplicates) return [];
     
+    const duplicatesToShow = searchTerm ? filteredDuplicates : compareResult.duplicates;
     const data = [];
-    compareResult.duplicates.forEach((dup, idx) => {
+    duplicatesToShow.forEach((dup, idx) => {
       // Database record - store original data separately to avoid conflicts
       data.push({
         _source: 'Database',
@@ -366,13 +411,14 @@ export default function DetectDuplicate() {
       });
     });
     return data;
-  }, [compareResult]);
+  }, [compareResult, filteredDuplicates, searchTerm]);
 
   // Headers for virtualized duplicate table with improved widths
   const duplicateTableHeaders = useMemo(() => {
     const availableHeaders = getAvailableHeaders();
     return [
       { key: '_source', label: 'Source', width: 120 },
+      { key: '_similarity', label: 'Similarity %', width: 100 },
       ...availableHeaders.map(header => ({
         ...header,
         width: header.key === 'name' ? 250 :
@@ -394,6 +440,21 @@ export default function DetectDuplicate() {
       return (
         <span className={`fw-bold ${rowData._source === 'Database' ? 'text-info' : 'text-warning'}`}>
           {rowData._source || 'Unknown'}
+        </span>
+      );
+    }
+
+    if (header.key === '_similarity') {
+      const dbName = getDisplayName(rowData._isExcel ? rowData._pairedData : rowData._originalData);
+      const excelName = getUniformValue(rowData._isExcel ? rowData._originalData : rowData._pairedData, { key: 'name', excelKey: 'Name' }, !rowData._isExcel);
+      const similarity = getStringSimilarity(dbName, excelName);
+      
+      return (
+        <span className={`fw-bold ${
+          similarity >= 80 ? 'text-success' :
+          similarity >= 60 ? 'text-warning' : 'text-danger'
+        }`}>
+          {similarity}%
         </span>
       );
     }
@@ -505,17 +566,27 @@ export default function DetectDuplicate() {
           {/* Duplicate Rows Comparison */}
           {compareResult.duplicates.length > 0 && (
             <Card className="mb-4">
-              <Card.Header className="text-danger d-flex justify-content-between align-items-center">
-                <span>Duplicate Rows Comparison ({compareResult.duplicates.length} duplicates found)</span>
-                <Button
-                  variant="outline-success"
+              <Card.Header className="text-danger">
+                <div className="d-flex justify-content-between align-items-center mb-2">
+                  <span>Duplicate Rows Comparison ({compareResult.duplicates.length} duplicates found)</span>
+                  <Button
+                    variant="outline-success"
+                    size="sm"
+                    onClick={downloadDuplicatesAsExcel}
+                    className="d-flex align-items-center gap-1"
+                  >
+                    <Download size={16} />
+                    Download Excel
+                  </Button>
+                </div>
+                <Form.Control
+                  type="text"
+                  placeholder="Search duplicates by name..."
+                  value={searchTerm}
+                  onChange={(e) => handleSearch(e.target.value)}
                   size="sm"
-                  onClick={downloadDuplicatesAsExcel}
-                  className="d-flex align-items-center gap-1"
-                >
-                  <Download size={16} />
-                  Download Excel
-                </Button>
+                  className="mt-2"
+                />
               </Card.Header>
               <Card.Body className="p-0">
                 <VirtualizedTable
