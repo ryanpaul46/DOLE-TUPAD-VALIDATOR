@@ -16,7 +16,7 @@ class CacheService {
         });
 
         this.client.on('error', (err) => {
-          console.warn('⚠️ Redis connection error - caching disabled:', err.message);
+          console.warn('⚠️ Redis connection error - caching disabled:', err.message?.replace(/[\r\n\t]/g, '_')?.substring(0, 100) || 'Unknown error');
           this.isConnected = false;
         });
 
@@ -30,7 +30,7 @@ class CacheService {
         console.log('💡 Redis caching not configured - running without cache');
       }
     } catch (error) {
-      console.warn('⚠️ Redis initialization failed - caching disabled:', error.message);
+      console.warn('⚠️ Redis initialization failed - caching disabled:', error.message?.replace(/[\r\n\t]/g, '_')?.substring(0, 100) || 'Unknown error');
       this.isConnected = false;
     }
   }

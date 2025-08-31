@@ -19,6 +19,12 @@ const api = axios.create({
   }
 });
 
+// Sanitize for logging
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
+
 // Enhanced request interceptor
 api.interceptors.request.use(
   (config) => {
@@ -29,7 +35,7 @@ api.interceptors.request.use(
     
     // Enhanced logging for development
     if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOGGING === 'true') {
-      console.log(`🔄 API Request: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`);
+      console.log(`🔄 API Request: ${sanitizeForLog(config.method?.toUpperCase())} ${sanitizeForLog(config.baseURL)}${sanitizeForLog(config.url)}`);
     }
     
     return config;
@@ -56,9 +62,9 @@ api.interceptors.response.use(
     if (import.meta.env.DEV) {
       console.error('❌ API Response Error:', {
         status: error.response?.status,
-        message: error.response?.data?.message || error.message,
-        url: error.config?.url,
-        method: error.config?.method?.toUpperCase()
+        message: sanitizeForLog(error.response?.data?.message || error.message),
+        url: sanitizeForLog(error.config?.url),
+        method: sanitizeForLog(error.config?.method?.toUpperCase())
       });
     }
     

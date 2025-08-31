@@ -3,6 +3,12 @@ import pg from "pg";
 import dotenv from "dotenv";
 dotenv.config();
 
+// Sanitize input for logging
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
+
 const { Pool } = pg;
 
 // Enhanced PostgreSQL configuration for local development
@@ -55,9 +61,9 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
-  console.error('❌ Unexpected database error:', err.message);
+  console.error('❌ Unexpected database error:', sanitizeForLog(err.message));
   if (process.env.DEBUG === 'true') {
-    console.error('Full error details:', err);
+    console.error('Full error details:', sanitizeForLog(JSON.stringify(err)));
   }
 });
 

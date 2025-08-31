@@ -44,7 +44,11 @@ export default function Database() {
     try {
       setLoading(true);
       setError("");
-      await api.post("/api/upload-excel", formData);
+      await api.post("/api/upload-excel", formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
       await fetchData();
       setFile(null);
     } catch (err) {

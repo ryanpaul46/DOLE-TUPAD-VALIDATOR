@@ -1,5 +1,11 @@
 import jwt from "jsonwebtoken";
 
+// Sanitize input for logging
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
+
 // General authentication middleware
 export const requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -15,7 +21,7 @@ export const requireAuth = (req, res, next) => {
     req.user = decoded; // { id, username, role }
     next();
   } catch (err) {
-    console.error("JWT verification error:", err.message);
+    console.error("JWT verification error:", sanitizeForLog(err.message));
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };

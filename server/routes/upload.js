@@ -1,30 +1,83 @@
 import express from "express";
 import multer from "multer";
 import path, { parse } from "path";
+import fs from "fs";
 import XLSX from "xlsx";
 import { pool } from "../db.js";
 import { OptimizedUploadService } from "../services/optimizedUploadService.js";
 import cacheService from "../services/cacheService.js";
+import { requireAuth } from "../middleware/authMiddleware.js";
+
+// Sanitize input for logging to prevent log injection
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
 
 const router = express.Router();
 const optimizedService = new OptimizedUploadService();
 
-// Multer storage with absolute path
+// Secure multer storage configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(process.cwd(), "./uploads")); // Correct uploads folder
+    const uploadsPath = path.resolve(process.cwd(), "uploads");
+    cb(null, uploadsPath);
   },
   filename: (req, file, cb) => {
-    cb(null, file.fieldname + "-" + Date.now() + path.extname(file.originalname));
+    // Sanitize filename to prevent path traversal
+    const sanitizedName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `${Date.now()}-${sanitizedName}`);
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['.xlsx', '.xls'];
+    const fileExt = path.extname(file.originalname).toLowerCase();
+    if (allowedTypes.includes(fileExt)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only Excel files (.xlsx, .xls) are allowed'));
+    }
+  }
+});
+
+// Multer error handling middleware
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ message: 'File too large', error: 'Maximum file size is 10MB' });
+    }
+    return res.status(400).json({ message: 'File upload error', error: err.message });
+  }
+  if (err) {
+    return res.status(400).json({ message: 'File validation error', error: err.message });
+  }
+  next();
+};
 
 // Upload Excel and insert into DB
-router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
+router.post("/upload-excel", requireAuth, upload.single("excelFile"), handleMulterError, async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+    
+    if (!req.file) {
+      return res.status(400).json({ 
+        message: "No file uploaded",
+        error: "Please select an Excel file to upload"
+      });
+    }
+
+    // Validate file exists and is readable
+    if (!fs.existsSync(req.file.path)) {
+      return res.status(400).json({ 
+        message: "File upload failed",
+        error: "Uploaded file not found"
+      });
+    }
 
     const workbook = XLSX.readFile(req.file.path);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -91,13 +144,13 @@ router.post("/upload-excel", upload.single("excelFile"), async (req, res) => {
 
     res.json({ message: "Excel data imported successfully", rowsInserted: data.length });
   } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ message: "File upload failed", error: err.message });
+    console.error("Upload error:", sanitizeForLog(err.message));
+    res.status(500).json({ message: "File upload failed", error: "Internal server error" });
   }
 });
 
 // Compare Excel with database (for client duplicate detection based on Names column)
-router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
+router.post("/compare-excel", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
@@ -200,7 +253,7 @@ router.post("/compare-excel", upload.single("excelFile"), async (req, res) => {
 });
 
 // Optimized compare Excel endpoint for large files
-router.post("/compare-excel-optimized", upload.single("excelFile"), async (req, res) => {
+router.post("/compare-excel-optimized", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
@@ -249,7 +302,7 @@ router.get("/uploaded-columns", async (req, res) => {
   }
 });
 
-router.delete("/uploaded-beneficiaries", async (req, res) => {
+router.delete("/uploaded-beneficiaries", requireAuth, async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries"); // Deletes all rows
     await cacheService.clearAll(); // Clear cache after database clear
@@ -260,7 +313,7 @@ router.delete("/uploaded-beneficiaries", async (req, res) => {
   }
 });
 
-router.delete("/uploaded-clear", async (req, res) => {
+router.delete("/uploaded-clear", requireAuth, async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries");
     await cacheService.clearAll(); // Clear cache after database clear
@@ -282,7 +335,7 @@ router.get("/cache-stats", async (req, res) => {
   }
 });
 
-router.delete("/clear-cache", async (req, res) => {
+router.delete("/clear-cache", requireAuth, async (req, res) => {
   try {
     await cacheService.clearAll();
     res.json({ message: "Cache cleared successfully" });
@@ -329,7 +382,7 @@ router.get("/beneficiaries-by-project-series", async (req, res) => {
 });
 
 // Upload Excel with duplicate scanning (Admin feature)
-router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, res) => {
+router.post("/upload-excel-with-scan", requireAuth, upload.single("excelFile"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
@@ -415,7 +468,7 @@ router.post("/upload-excel-with-scan", upload.single("excelFile"), async (req, r
 });
 
 // Upload only new records after scan confirmation
-router.post("/upload-new-records", async (req, res) => {
+router.post("/upload-new-records", requireAuth, async (req, res) => {
   try {
     const { newRecords } = req.body;
     

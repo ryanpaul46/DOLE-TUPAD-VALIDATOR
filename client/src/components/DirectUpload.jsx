@@ -3,6 +3,7 @@ import { Button, Form, Spinner } from 'react-bootstrap';
 import { ExclamationTriangle } from 'react-bootstrap-icons';
 import api from '../api/axios';
 
+
 export default function DirectUpload({ onDataRefresh }) {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -15,6 +16,7 @@ export default function DirectUpload({ onDataRefresh }) {
 
     try {
       setLoading(true);
+
       await api.post("/api/upload-excel", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });

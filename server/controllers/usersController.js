@@ -2,6 +2,12 @@
 import { pool } from "../db.js";
 import bcrypt from "bcrypt";
 
+// Sanitize input for logging
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
+
 // GET all users (don’t expose password_hash!)
 export const getAllUsers = async (req, res) => {
   try {
@@ -10,7 +16,7 @@ export const getAllUsers = async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    console.error("Error fetching users:", err.message);
+    console.error("Error fetching users:", sanitizeForLog(err.message));
     res.status(500).json({ message: "Failed to fetch users" });
   }
 };
@@ -43,7 +49,7 @@ export const createUser = async (req, res) => {
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    console.error("Error creating user:", err.message);
+    console.error("Error creating user:", sanitizeForLog(err.message));
     res.status(500).json({ message: "Failed to create user" });
   }
 };
@@ -75,7 +81,7 @@ export const updateUser = async (req, res) => {
 
     res.json(result.rows[0]);
   } catch (err) {
-    console.error("Error updating user:", err.message);
+    console.error("Error updating user:", sanitizeForLog(err.message));
     res.status(500).json({ message: "Failed to update user" });
   }
 };
@@ -93,7 +99,7 @@ export const deleteUser = async (req, res) => {
 
     res.json({ message: "User deleted", id });
   } catch (err) {
-    console.error("Error deleting user:", err.message);
+    console.error("Error deleting user:", sanitizeForLog(err.message));
     res.status(500).json({ message: "Failed to delete user" });
   }
 };

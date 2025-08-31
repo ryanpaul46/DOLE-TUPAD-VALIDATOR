@@ -4,6 +4,14 @@ import cors from "cors";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import session from "express-session";
+import { generateCSRFToken } from "./middleware/csrfMiddleware.js";
+
+// Sanitize input for logging
+const sanitizeForLog = (input) => {
+  if (typeof input !== 'string') return input;
+  return input.replace(/[\r\n\t]/g, '_').substring(0, 100);
+};
 
 import { pool } from "./db.js";
 import usersRouter from "./routes/users.js";
@@ -34,14 +42,26 @@ app.use(
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token']
   })
 );
+
+// Session middleware for CSRF protection
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-session-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
 
 // Development logging middleware
 if (process.env.NODE_ENV === 'development' && process.env.VERBOSE_LOGGING === 'true') {
   app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    console.log(`[${new Date().toISOString()}] ${sanitizeForLog(req.method)} ${sanitizeForLog(req.url)}`);
     next();
   });
 }
@@ -69,6 +89,13 @@ pool.connect()
 // Static file serving for uploads
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
+// CSRF token endpoint
+app.get('/api/csrf-token', (req, res) => {
+  const token = generateCSRFToken();
+  req.session.csrfToken = token;
+  res.json({ csrfToken: token });
+});
+
 // API routes
 app.use("/auth", authRouter);
 app.use("/api/users", usersRouter);
@@ -92,7 +119,7 @@ app.get("/health", async (req, res) => {
       status: "error",
       timestamp: new Date().toISOString(),
       database: "disconnected",
-      error: err.message
+      error: sanitizeForLog(err.message)
     });
   }
 });
@@ -121,7 +148,7 @@ app.use((err, req, res, next) => {
   
   if (process.env.NODE_ENV === 'development') {
     res.status(err.status || 500).json({
-      error: err.message,
+      error: sanitizeForLog(err.message),
       stack: err.stack,
       timestamp: new Date().toISOString()
     });
