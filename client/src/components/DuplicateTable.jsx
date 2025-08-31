@@ -1,7 +1,6 @@
 import { useMemo, useCallback } from 'react';
-import { Card, Form, Button } from 'react-bootstrap';
+import { Card, Form, Button, Table } from 'react-bootstrap';
 import { Download } from 'react-bootstrap-icons';
-import VirtualizedTable from './VirtualizedTable';
 import { getAvailableHeaders } from '../utils/tableHeaders';
 import { getUniformValue, isDifferent } from '../utils/dataUtils';
 import { getDisplayName } from '../utils/nameUtils';
@@ -11,7 +10,8 @@ export default function DuplicateTable({
   searchTerm, 
   onSearch, 
   filteredDuplicates, 
-  onDownload 
+  onDownload,
+  downloadLabel = "Download Excel"
 }) {
   const duplicateTableData = useMemo(() => {
     if (!compareResult?.duplicates) return [];
@@ -117,7 +117,7 @@ export default function DuplicateTable({
             className="d-flex align-items-center gap-1"
           >
             <Download size={16} />
-            Download Excel
+            {downloadLabel}
           </Button>
         </div>
         <Form.Control
@@ -130,14 +130,28 @@ export default function DuplicateTable({
         />
       </Card.Header>
       <Card.Body className="p-0">
-        <VirtualizedTable
-          data={duplicateTableData}
-          headers={duplicateTableHeaders}
-          height={500}
-          rowHeight={50}
-          renderCell={renderDuplicateCell}
-          className="border-0"
-        />
+        <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+          <Table striped bordered hover size="sm" className="mb-0">
+            <thead className="position-sticky top-0 bg-light">
+              <tr>
+                {duplicateTableHeaders.map(header => (
+                  <th key={header.key}>{header.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {duplicateTableData.map((row, idx) => (
+                <tr key={idx}>
+                  {duplicateTableHeaders.map(header => (
+                    <td key={header.key}>
+                      {renderDuplicateCell(row, header)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </Card.Body>
     </Card>
   );

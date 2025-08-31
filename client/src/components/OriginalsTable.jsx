@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { Card } from 'react-bootstrap';
-import VirtualizedTable from './VirtualizedTable';
+import { Card, Table } from 'react-bootstrap';
 import { getAvailableHeaders } from '../utils/tableHeaders';
 import { getUniformValue } from '../utils/dataUtils';
 
@@ -40,14 +39,28 @@ export default function OriginalsTable({ compareResult }) {
         Original Rows (Not in Database) - {compareResult.originals.length} records
       </Card.Header>
       <Card.Body className="p-0">
-        <VirtualizedTable
-          data={originalsData}
-          headers={originalsHeaders}
-          height={400}
-          rowHeight={45}
-          renderCell={renderOriginalsCell}
-          className="border-0"
-        />
+        <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+          <Table striped bordered hover size="sm" className="mb-0">
+            <thead className="position-sticky top-0 bg-light">
+              <tr>
+                {originalsHeaders.map(header => (
+                  <th key={header.key}>{header.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {originalsData.map((row, idx) => (
+                <tr key={idx}>
+                  {originalsHeaders.map(header => (
+                    <td key={header.key}>
+                      {renderOriginalsCell(row, header)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </div>
       </Card.Body>
     </Card>
   );
