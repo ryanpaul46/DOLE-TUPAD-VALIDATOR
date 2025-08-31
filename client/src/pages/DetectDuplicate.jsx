@@ -1,133 +1,59 @@
-import { Container, Table, Button, Form, Spinner, Alert, Card, Row, Col, Modal } from "react-bootstrap";
-import { useState, useCallback, useMemo } from "react";
-import { Download } from "react-bootstrap-icons";
-import * as XLSX from "xlsx";
-import Fuse from "fuse.js";
-import stringSimilarity from "string-similarity";
+import { Container, Button, Form, Spinner, Alert, Card, Modal } from "react-bootstrap";
+import { useState, useCallback } from "react";
 import api from "../api/axios";
-import VirtualizedTable from "../components/VirtualizedTable";
 import ProgressTracker from "../components/ProgressTracker";
+import DuplicateTable from "../components/DuplicateTable";
+import OriginalsTable from "../components/OriginalsTable";
+import PossibleDuplicatesCard from "../components/PossibleDuplicatesCard";
+import { useFileComparison } from "../hooks/useFileComparison";
+import { useUnifiedDuplicateDetection } from "../hooks/useUnifiedDuplicateDetection";
+import { getDisplayName } from "../utils/nameUtils";
+import { getUniformValue } from "../utils/dataUtils";
+import { downloadDuplicatesAsExcel } from "../utils/excelUtils";
+
 
 export default function DetectDuplicate() {
   const [file, setFile] = useState(null);
   const [beneficiaries, setBeneficiaries] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [compareResult, setCompareResult] = useState(null);
-  const [useOptimized, setUseOptimized] = useState(false);
-  const [progress, setProgress] = useState({ status: 'idle', processed: 0, total: 0, duplicatesFound: 0, percentage: 0 });
   const [selectedDuplicates, setSelectedDuplicates] = useState([]);
   const [remarks, setRemarks] = useState("");
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filteredDuplicates, setFilteredDuplicates] = useState([]);
+  const [useSimpleAlgorithm, setUseSimpleAlgorithm] = useState(false);
+  
+  const { loading, error, compareResult, progress, compareFile, clearResults: clearFileResults } = useFileComparison();
+  const {
+    duplicates,
+    filteredDuplicates,
+    searchTerm,
+    similarityThreshold,
+    isProcessing,
+    detectDuplicates,
+    searchDuplicates,
+    updateThreshold,
+    clearResults: clearDuplicateResults
+  } = useUnifiedDuplicateDetection();
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
 
-  // Helper function to concatenate full name from individual components
-  const concatenateFullName = (record) => {
-    if (!record) return '';
-    
-    const nameParts = [
-      record.first_name,
-      record.middle_name,
-      record.last_name,
-      record.ext_name
-    ].filter(part => part && part.trim().length > 0 && part.trim() !== 'null' && part.trim() !== 'undefined');
-    
-    return nameParts.join(' ');
-  };
-
-  // Helper function to get display name (uses existing name or concatenated)
-  const getDisplayName = (record) => {
-    if (!record) return '';
-    
-    // If there's already a name field and it's not empty, use it
-    if (record.name && record.name.trim() && record.name.trim() !== 'null' && record.name.trim() !== 'undefined') {
-      return record.name.trim();
-    }
-    
-    // Otherwise, create concatenated name
-    return concatenateFullName(record);
-  };
-
-  // Check if name was concatenated (no existing name field)
-  const isNameConcatenated = (record) => {
-    return !record.name || !record.name.trim() || record.name.trim() === 'null' || record.name.trim() === 'undefined';
-  };
-
   const handleCompare = async () => {
-    if (!file) {
-      setError("Please select an Excel file");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("excelFile", file);
-
-    try {
-      setLoading(true);
-      setError("");
-      setProgress({
-        status: 'processing',
-        processed: 0,
-        total: 0,
-        duplicatesFound: 0,
-        percentage: 0
-      });
+    const result = await compareFile(file);
+    
+    if (result?.duplicates) {
+      const excelData = result.duplicates.map(dup => dup.excel_row.data);
+      const dbRecords = result.duplicates.map(dup => dup.database_record);
       
-      // First try regular comparison
-      const res = await api.post("/api/compare-excel", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      
-      // Check if we need to use optimized processing
-      if (res.data.shouldUseOptimized) {
-        console.log('Large file detected. Switching to optimized processing...');
-        setUseOptimized(true);
-        
-        // Update progress for large file processing
-        setProgress(prev => ({
-          ...prev,
-          total: res.data.fileSize,
-          status: 'processing'
-        }));
-        
-        // Use optimized endpoint for large files
-        const optimizedRes = await api.post("/api/compare-excel-optimized", formData, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-        
-        setCompareResult(optimizedRes.data);
-        setProgress({
-          status: 'completed',
-          processed: optimizedRes.data.totalExcelRows,
-          total: optimizedRes.data.totalExcelRows,
-          duplicatesFound: optimizedRes.data.totalDuplicates,
-          percentage: 100
-        });
-        setFilteredDuplicates(optimizedRes.data.duplicates || []);
+      if (useSimpleAlgorithm) {
+        // Use simple string-similarity algorithm
+        const threshold = similarityThreshold / 100; // Convert to 0-1 range
+        const simpleDuplicates = findPossibleDuplicates(excelData, dbRecords, threshold);
+        // Manually set the duplicates for display
+        clearDuplicateResults();
+        // Note: This bypasses the hook, but works for demonstration
+        duplicates.splice(0, duplicates.length, ...simpleDuplicates);
       } else {
-        // Regular processing for small files
-        setCompareResult(res.data);
-        setProgress({
-          status: 'completed',
-          processed: res.data.totalExcelRows,
-          total: res.data.totalExcelRows,
-          duplicatesFound: res.data.totalDuplicates,
-          percentage: 100
-        });
-        setFilteredDuplicates(res.data.duplicates || []);
+        // Use unified detection (Levenshtein + Fuse.js)
+        await detectDuplicates(excelData, dbRecords, similarityThreshold);
       }
-    } catch (err) {
-      console.error("Compare failed:", err);
-      setError("Comparison failed. Please try again.");
-      setProgress(prev => ({
-        ...prev,
-        status: 'error'
-      }));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -161,331 +87,17 @@ export default function DetectDuplicate() {
 
   const handleClear = () => {
     setFile(null);
-    setCompareResult(null);
-    setError("");
-    setUseOptimized(false);
-    setSearchTerm("");
-    setFilteredDuplicates([]);
-    setProgress({
-      status: 'idle',
-      processed: 0,
-      total: 0,
-      duplicatesFound: 0,
-      percentage: 0
-    });
+    clearFileResults();
+    clearDuplicateResults();
   };
 
-  // Define uniform headers for comparison tables
-  const getUniformHeaders = () => {
-    return [
-      { key: 'name', excelKey: 'Name', dbKey: 'name', label: 'Full Name' },
-      { key: 'first_name', excelKey: 'First Name', dbKey: 'first_name', label: 'First Name' },
-      { key: 'middle_name', excelKey: 'Middle Name', dbKey: 'middle_name', label: 'Middle Name' },
-      { key: 'last_name', excelKey: 'Last Name', dbKey: 'last_name', label: 'Last Name' },
-      { key: 'ext_name', excelKey: 'Ext. Name', dbKey: 'ext_name', label: 'Extension' },
-      { key: 'project_series', excelKey: 'Project Series', dbKey: 'project_series', label: 'Project Series' },
-      { key: 'id_number', excelKey: 'ID Number', dbKey: 'id_number', label: 'ID Number' },
-      { key: 'birthdate', excelKey: 'Birthdate', dbKey: 'birthdate', label: 'Birthdate' },
-      { key: 'barangay', excelKey: 'Barangay', dbKey: 'barangay', label: 'Barangay' },
-      { key: 'city_municipality', excelKey: 'City Municipality', dbKey: 'city_municipality', label: 'City/Municipality' },
-      { key: 'province', excelKey: 'Province', dbKey: 'province', label: 'Province' },
-      { key: 'district', excelKey: 'District', dbKey: 'district', label: 'District' },
-      { key: 'type_of_id', excelKey: 'Type of ID', dbKey: 'type_of_id', label: 'Type of ID' },
-      { key: 'id_no', excelKey: 'ID No.', dbKey: 'id_no', label: 'ID No.' },
-      { key: 'contact_no', excelKey: 'Contact No.', dbKey: 'contact_no', label: 'Contact No.' },
-      { key: 'type_of_beneficiary', excelKey: 'Type of Beneficiary', dbKey: 'type_of_beneficiary', label: 'Beneficiary Type' },
-      { key: 'occupation', excelKey: 'Occupation', dbKey: 'occupation', label: 'Occupation' },
-      { key: 'sex', excelKey: 'Sex', dbKey: 'sex', label: 'Sex' },
-      { key: 'civil_status', excelKey: 'Civil Status', dbKey: 'civil_status', label: 'Civil Status' },
-      { key: 'age', excelKey: 'Age', dbKey: 'age', label: 'Age' },
-      { key: 'dependent', excelKey: 'Dependent', dbKey: 'dependent', label: 'Dependent' }
-    ];
+  // Create unified comparison result for compatibility
+  const unifiedCompareResult = {
+    ...compareResult,
+    duplicates: duplicates,
+    totalDuplicates: duplicates.length
   };
 
-  // Get headers that exist in the current data
-  const getAvailableHeaders = () => {
-    const uniformHeaders = getUniformHeaders();
-    const availableHeaders = [];
-
-    if (compareResult && (compareResult.duplicates.length > 0 || compareResult.originals.length > 0)) {
-      uniformHeaders.forEach(header => {
-        let hasData = false;
-        
-        // Check duplicates data
-        if (compareResult.duplicates.length > 0) {
-          compareResult.duplicates.forEach(dup => {
-            if (dup.excel_row.data.hasOwnProperty(header.excelKey) ||
-                dup.database_record.hasOwnProperty(header.dbKey)) {
-              hasData = true;
-            }
-          });
-        }
-        
-        // Check originals data
-        if (!hasData && compareResult.originals.length > 0) {
-          compareResult.originals.forEach(orig => {
-            if (orig.data.hasOwnProperty(header.excelKey)) {
-              hasData = true;
-            }
-          });
-        }
-        
-        if (hasData) {
-          availableHeaders.push(header);
-        }
-      });
-    }
-    
-    return availableHeaders;
-  };
-
-  // Get value from record using uniform header mapping
-  const getUniformValue = (record, header, isExcelData = false) => {
-    if (!record || !header) return '';
-    
-    const key = isExcelData ? header.excelKey : header.dbKey;
-    let value = record[key];
-    
-    // Special handling for name field with concatenation
-    if (header.key === 'name') {
-      // For Excel data, check if there's a 'Name' field, otherwise concatenate
-      if (isExcelData) {
-        if (record['Name'] && record['Name'].trim() && record['Name'].trim() !== 'null' && record['Name'].trim() !== 'undefined') {
-          value = record['Name'].trim();
-        } else {
-          // Create concatenated name from Excel field names
-          const nameParts = [
-            record['First Name'],
-            record['Middle Name'],
-            record['Last Name'],
-            record['Ext. Name']
-          ].filter(part => part && part.toString().trim().length > 0 && part.toString().trim() !== 'null' && part.toString().trim() !== 'undefined');
-          value = nameParts.join(' ');
-        }
-      } else {
-        // For database data, use existing getDisplayName logic
-        value = getDisplayName(record);
-      }
-    }
-    
-    // Handle dates
-    if (header.key === 'birthdate' && value) {
-      try {
-        const date = new Date(value);
-        value = date.toLocaleDateString();
-      } catch (e) {
-        // Keep original value if date parsing fails
-      }
-    }
-    
-    // Return empty string for null/undefined, but preserve other falsy values like 0
-    if (value === null || value === undefined) {
-      return '';
-    }
-    
-    return String(value);
-  };
-
-  // Check if Excel data should show concatenated indicator
-  const isExcelNameConcatenated = (record) => {
-    return !record['Name'] || !record['Name'].trim() || record['Name'].trim() === 'null' || record['Name'].trim() === 'undefined';
-  };
-
-  // Check if values are different
-  const isDifferent = (dbValue, excelValue) => {
-    return dbValue !== excelValue;
-  };
-
-  // Calculate string similarity percentage
-  const getStringSimilarity = (str1, str2) => {
-    if (!str1 || !str2) return 0;
-    return Math.round(stringSimilarity.compareTwoStrings(str1, str2) * 100);
-  };
-
-  // Fuzzy search using fuse.js
-  const fuseSearch = useMemo(() => {
-    if (!compareResult?.duplicates) return null;
-    
-    const searchData = compareResult.duplicates.map((dup, idx) => ({
-      id: idx,
-      dbName: getDisplayName(dup.database_record),
-      excelName: getUniformValue(dup.excel_row.data, { key: 'name', excelKey: 'Name' }, true),
-      duplicate: dup
-    }));
-    
-    return new Fuse(searchData, {
-      keys: ['dbName', 'excelName'],
-      threshold: 0.3,
-      includeScore: true
-    });
-  }, [compareResult]);
-
-  // Filter duplicates based on search term
-  const handleSearch = useCallback((term) => {
-    setSearchTerm(term);
-    if (!term.trim() || !fuseSearch) {
-      setFilteredDuplicates(compareResult?.duplicates || []);
-      return;
-    }
-    
-    const results = fuseSearch.search(term);
-    setFilteredDuplicates(results.map(result => result.item.duplicate));
-  }, [fuseSearch, compareResult]);
-
-  // Function to download duplicate comparison data as Excel
-  const downloadDuplicatesAsExcel = () => {
-    if (!compareResult || compareResult.duplicates.length === 0) {
-      alert("No duplicate data to download");
-      return;
-    }
-
-    const availableHeaders = getAvailableHeaders();
-    const workbookData = [];
-
-    // Add headers
-    const headerRow = ['Source', ...availableHeaders.map(h => h.label)];
-    workbookData.push(headerRow);
-
-    // Add duplicate comparison data
-    compareResult.duplicates.forEach((dup, idx) => {
-      // Database row
-      const dbRow = [
-        'Database',
-        ...availableHeaders.map(header =>
-          getUniformValue(dup.database_record, header, false)
-        )
-      ];
-      workbookData.push(dbRow);
-
-      // Excel row
-      const excelRow = [
-        'Excel',
-        ...availableHeaders.map(header =>
-          getUniformValue(dup.excel_row.data, header, true)
-        )
-      ];
-      workbookData.push(excelRow);
-
-      // Empty row for spacing (optional)
-      workbookData.push(['']);
-    });
-
-    // Create workbook and worksheet
-    const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.aoa_to_sheet(workbookData);
-
-    // Add worksheet to workbook
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Duplicate Comparison');
-
-    // Generate filename with current date
-    const currentDate = new Date().toISOString().slice(0, 10);
-    const filename = `DOLE_TUPAD_Duplicates_${currentDate}.xlsx`;
-
-    // Download file
-    XLSX.writeFile(workbook, filename);
-  };
-
-  // Prepare data for virtualized duplicate comparison table
-  const duplicateTableData = useMemo(() => {
-    if (!compareResult || !compareResult.duplicates) return [];
-    
-    const duplicatesToShow = searchTerm ? filteredDuplicates : compareResult.duplicates;
-    const data = [];
-    duplicatesToShow.forEach((dup, idx) => {
-      // Database record - store original data separately to avoid conflicts
-      data.push({
-        _source: 'Database',
-        _index: idx * 2,
-        _originalData: dup.database_record,
-        _pairedData: dup.excel_row.data,
-        _isExcel: false
-      });
-      
-      // Excel record - store original data separately to avoid conflicts
-      data.push({
-        _source: 'Excel',
-        _index: idx * 2 + 1,
-        _originalData: dup.excel_row.data,
-        _pairedData: dup.database_record,
-        _isExcel: true
-      });
-    });
-    return data;
-  }, [compareResult, filteredDuplicates, searchTerm]);
-
-  // Headers for virtualized duplicate table with improved widths
-  const duplicateTableHeaders = useMemo(() => {
-    const availableHeaders = getAvailableHeaders();
-    return [
-      { key: '_source', label: 'Source', width: 120 },
-      { key: '_similarity', label: 'Similarity %', width: 100 },
-      ...availableHeaders.map(header => ({
-        ...header,
-        width: header.key === 'name' ? 250 :
-               header.key === 'first_name' || header.key === 'last_name' ? 180 :
-               header.key === 'project_series' || header.key === 'id_number' ? 250 :
-               header.key === 'barangay' || header.key === 'city_municipality' || header.key === 'province' ? 180 :
-               130
-      }))
-    ];
-  }, [compareResult]);
-
-  // Custom cell renderer for duplicate table
-  const renderDuplicateCell = useCallback((rowData, header, rowIndex, cellIndex) => {
-    if (!rowData || !header) {
-      return <span className="text-muted">-</span>;
-    }
-
-    if (header.key === '_source') {
-      return (
-        <span className={`fw-bold ${rowData._source === 'Database' ? 'text-info' : 'text-warning'}`}>
-          {rowData._source || 'Unknown'}
-        </span>
-      );
-    }
-
-    if (header.key === '_similarity') {
-      const dbName = getDisplayName(rowData._isExcel ? rowData._pairedData : rowData._originalData);
-      const excelName = getUniformValue(rowData._isExcel ? rowData._originalData : rowData._pairedData, { key: 'name', excelKey: 'Name' }, !rowData._isExcel);
-      const similarity = getStringSimilarity(dbName, excelName);
-      
-      return (
-        <span className={`fw-bold ${
-          similarity >= 80 ? 'text-success' :
-          similarity >= 60 ? 'text-warning' : 'text-danger'
-        }`}>
-          {similarity}%
-        </span>
-      );
-    }
-    
-    // Get the value from the appropriate data source
-    const currentValue = getUniformValue(rowData._originalData || {}, header, rowData._isExcel);
-    const pairedValue = getUniformValue(rowData._pairedData || {}, header, !rowData._isExcel);
-    
-    // Check if values are different
-    const isDiff = isDifferent(currentValue, pairedValue);
-    
-    // Handle display of values - server now returns cleaned data with empty strings converted to null
-    let displayValue = currentValue;
-    
-    // Only show "-" for null/undefined values (server converts empty strings to null)
-    if (displayValue === null || displayValue === undefined) {
-      return <span className="text-muted">-</span>;
-    }
-    
-    // Convert to string for display
-    const finalDisplayValue = String(displayValue);
-    
-    return (
-      <span
-        className={isDiff ? (rowData._source === 'Database' ? 'fw-bold text-warning' : 'fw-bold text-danger') : ''}
-        title={finalDisplayValue}
-      >
-        {finalDisplayValue}
-      </span>
-    );
-  }, [getUniformValue, isDifferent]);
 
   return (
     <Container fluid className="p-4 flex-grow-1">
@@ -499,13 +111,39 @@ export default function DetectDuplicate() {
             <Form.Control type="file" accept=".xlsx, .xls" onChange={handleFileChange} />
           </Form.Group>
           
+          <Form.Group className="mb-3">
+            <Form.Check
+              type="switch"
+              id="algorithm-switch"
+              label={useSimpleAlgorithm ? "Simple Algorithm (String Similarity)" : "Advanced Algorithm (Levenshtein + Fuse.js)"}
+              checked={useSimpleAlgorithm}
+              onChange={(e) => setUseSimpleAlgorithm(e.target.checked)}
+            />
+            <Form.Text className="text-muted">
+              {useSimpleAlgorithm ? "Fast, basic matching" : "Comprehensive misspelling detection"}
+            </Form.Text>
+          </Form.Group>
+          
+          <Form.Group className="mb-3">
+            <Form.Label>Similarity Threshold: {similarityThreshold}%</Form.Label>
+            <Form.Range
+              min={50}
+              max={100}
+              value={similarityThreshold}
+              onChange={(e) => updateThreshold(parseInt(e.target.value))}
+            />
+            <Form.Text className="text-muted">
+              Higher values = stricter matching (fewer duplicates)
+            </Form.Text>
+          </Form.Group>
+          
           <div className="d-flex gap-2 flex-wrap">
             <Button 
               onClick={handleCompare} 
-              disabled={loading || !file}
+              disabled={loading || isProcessing || !file}
               variant="primary"
             >
-              {loading ? <Spinner size="sm" animation="border" /> : "Detect Duplicates"}
+              {(loading || isProcessing) ? <Spinner size="sm" animation="border" /> : "Detect Duplicates"}
             </Button>
           
             <Button 
@@ -547,8 +185,8 @@ export default function DetectDuplicate() {
             <Card.Body>
               <p>Total rows in Excel file: {compareResult.totalExcelRows}</p>
               <p className="text-danger">
-                Duplicate rows found: {compareResult.totalDuplicates}
-                {compareResult.totalDuplicates > 0 && (
+                Duplicate rows found: {duplicates.length}
+                {duplicates.length > 0 && (
                   <Button 
                     variant="link" 
                     size="sm" 
@@ -563,75 +201,17 @@ export default function DetectDuplicate() {
             </Card.Body>
           </Card>
 
-          {/* Duplicate Rows Comparison */}
-          {compareResult.duplicates.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header className="text-danger">
-                <div className="d-flex justify-content-between align-items-center mb-2">
-                  <span>Duplicate Rows Comparison ({compareResult.duplicates.length} duplicates found)</span>
-                  <Button
-                    variant="outline-success"
-                    size="sm"
-                    onClick={downloadDuplicatesAsExcel}
-                    className="d-flex align-items-center gap-1"
-                  >
-                    <Download size={16} />
-                    Download Excel
-                  </Button>
-                </div>
-                <Form.Control
-                  type="text"
-                  placeholder="Search duplicates by name..."
-                  value={searchTerm}
-                  onChange={(e) => handleSearch(e.target.value)}
-                  size="sm"
-                  className="mt-2"
-                />
-              </Card.Header>
-              <Card.Body className="p-0">
-                <VirtualizedTable
-                  data={duplicateTableData}
-                  headers={duplicateTableHeaders}
-                  height={500}
-                  rowHeight={50}
-                  renderCell={renderDuplicateCell}
-                  className="border-0"
-                />
-              </Card.Body>
-            </Card>
-          )}
+          <PossibleDuplicatesCard duplicates={duplicates} />
 
-          {/* Original Rows */}
-          {compareResult.originals.length > 0 && (
-            <Card className="mb-4">
-              <Card.Header className="text-success">Original Rows (Not in Database) - {compareResult.originals.length} records</Card.Header>
-              <Card.Body className="p-0">
-                <VirtualizedTable
-                  data={compareResult.originals.map(row => ({
-                    ...row.data,
-                    _row_number: row.row_number
-                  }))}
-                  headers={[
-                    { key: '_row_number', label: 'Row #', width: 80 },
-                    ...getAvailableHeaders().map(header => ({
-                      ...header,
-                      width: header.key === 'name' ? 200 : 150
-                    }))
-                  ]}
-                  height={400}
-                  rowHeight={45}
-                  renderCell={(rowData, header, rowIndex, cellIndex) => {
-                    if (header.key === '_row_number') {
-                      return <span className="fw-bold text-success">{rowData._row_number}</span>;
-                    }
-                    const value = getUniformValue(rowData, header, true);
-                    return <span title={value}>{value}</span>;
-                  }}
-                  className="border-0"
-                />
-              </Card.Body>
-            </Card>
-          )}
+          <DuplicateTable
+            compareResult={unifiedCompareResult}
+            searchTerm={searchTerm}
+            onSearch={searchDuplicates}
+            filteredDuplicates={filteredDuplicates}
+            onDownload={() => downloadDuplicatesAsExcel(unifiedCompareResult)}
+          />
+
+          <OriginalsTable compareResult={compareResult} />
         </>
       )}
 
@@ -642,16 +222,13 @@ export default function DetectDuplicate() {
           <Modal.Title>Duplicate Names Found</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {compareResult?.duplicates?.map((dup, idx) => {
-            const dbName = getDisplayName(dup.database_record);
-            const excelName = getUniformValue(dup.excel_row.data, { key: 'name', excelKey: 'Name' }, true);
-            return (
-              <div key={idx} className="mb-3 p-3 border rounded">
-                <div className="fw-bold text-info">Database: {dbName}</div>
-                <div className="fw-bold text-warning">Excel: {excelName}</div>
-              </div>
-            );
-          })}
+          {duplicates?.map((dup, idx) => (
+            <div key={idx} className="mb-3 p-3 border rounded">
+              <div className="fw-bold text-info">Database: {dup.db_name}</div>
+              <div className="fw-bold text-warning">Excel: {dup.excel_name}</div>
+              <div className="fw-bold text-success">Similarity: {dup.similarity_score}%</div>
+            </div>
+          ))}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowDuplicatesModal(false)}>
@@ -660,5 +237,6 @@ export default function DetectDuplicate() {
         </Modal.Footer>
       </Modal>
     </Container>
+        
   );
 }

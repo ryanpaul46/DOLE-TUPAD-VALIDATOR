@@ -3,6 +3,9 @@ import { useOutletContext } from "react-router-dom";
 import { Container, Button, Form, Spinner, Alert, Table, Pagination, Card, Row, Col, InputGroup, Badge, Modal } from "react-bootstrap";
 import { Upload, Search, ExclamationTriangle, CheckCircle } from "react-bootstrap-icons";
 import api from "../api/axios";
+import { detectDuplicatesUnified } from "../utils/unifiedDuplicateDetection";
+import { getDisplayName } from "../utils/nameUtils";
+import { getUniformValue } from "../utils/dataUtils";
 
 export default function Database() {
   // Get role from outlet context
@@ -96,7 +99,7 @@ export default function Database() {
     }
   };
 
-  // Smart upload with duplicate scanning
+  // Enhanced smart upload with unified duplicate detection
   const handleScanUpload = async () => {
     if (!scanFile) {
       setError("Please select a file first");
@@ -110,11 +113,35 @@ export default function Database() {
       setScanning(true);
       setError("");
       
-      const response = await api.post("/api/upload-excel-with-scan", formData, {
+      // Use existing compare-excel endpoint to get Excel data and existing duplicates
+      const compareResponse = await api.post("/api/compare-excel", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
       
-      setScanResults(response.data.scanResults);
+      // Extract Excel data from the response
+      const excelData = compareResponse.data.originals?.map(orig => orig.data) || [];
+      const existingDuplicates = compareResponse.data.duplicates || [];
+      
+      // Use unified duplicate detection for better misspelling detection on all Excel data
+      const allExcelData = [
+        ...excelData,
+        ...existingDuplicates.map(dup => dup.excel_row.data)
+      ];
+      
+      const enhancedDuplicates = detectDuplicatesUnified(allExcelData, data, 60);
+      
+      // Separate new records (not duplicates)
+      const duplicateExcelRows = new Set(enhancedDuplicates.map(dup => dup.excel_row.row_number));
+      const newRecords = allExcelData.filter((_, index) => !duplicateExcelRows.has(index + 1));
+      
+      setScanResults({
+        duplicates: enhancedDuplicates,
+        newRecords: newRecords,
+        totalExcelRows: allExcelData.length,
+        totalDuplicates: enhancedDuplicates.length,
+        totalNewRecords: newRecords.length
+      });
+      
       setShowScanModal(true);
     } catch (err) {
       console.error("Scan failed:", err);
@@ -160,9 +187,10 @@ export default function Database() {
     if (selectedDuplicates.length === 0) return;
 
     const selectedExcelRecords = selectedDuplicates.map(idx => {
-      const record = { ...scanResults.duplicates[idx].excel_record };
-      // Append remarks to the record
-      record.remarks = duplicateRemarks;
+      const duplicate = scanResults.duplicates[idx];
+      const record = { ...duplicate.excel_row.data };
+      // Append remarks and similarity info
+      record.remarks = `${duplicateRemarks} (Similarity: ${duplicate.similarity_score}%)`;
       return record;
     });
 
@@ -274,7 +302,7 @@ export default function Database() {
                 Smart Upload (Recommended)
               </h6>
               <p className="text-muted small mb-2">
-                Upload Excel file with automatic duplicate scanning before adding to database
+                Upload Excel file with enhanced misspelling detection and duplicate scanning
               </p>
               <div className="d-flex gap-2 flex-wrap align-items-center">
                 <Form.Control
@@ -289,10 +317,173 @@ export default function Database() {
                   disabled={scanning || !scanFile}
                   size="sm"
                 >
-                  {scanning ? <Spinner size="sm" animation="border" /> : "Scan & Upload"}
+                  {scanning ? (
+                    <>
+                      <Spinner size="sm" animation="border" className="me-1" />
+                      Scanning for duplicates...
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={16} className="me-1" />
+                      Scan & Upload
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
+
+            {/* Scan Results Modal */}
+            <Modal show={showScanModal} onHide={handleCloseScanModal} size="lg">
+              <Modal.Header closeButton>
+                <Modal.Title>Upload Scan Results</Modal.Title>
+              </Modal.Header>
+              <Modal.Body>
+                {scanResults && (
+                  <>
+                    <div className="mb-3">
+                      <h6>Scan Summary:</h6>
+                      <ul className="list-unstyled">
+                        <li><Badge bg="primary">{scanResults.totalExcelRows}</Badge> Total rows in Excel</li>
+                        <li><Badge bg="success">{scanResults.totalNewRecords}</Badge> New records (will be uploaded)</li>
+                        <li><Badge bg="warning">{scanResults.totalDuplicates}</Badge> Possible duplicates found</li>
+                      </ul>
+                    </div>
+                    
+                    {scanResults.totalDuplicates > 0 && (
+                      <div className="mb-3">
+                        <h6 className="text-warning">Possible Duplicates Detected:</h6>
+                        <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                          {scanResults.duplicates.map((dup, idx) => (
+                            <div key={idx} className="border rounded p-2 mb-2 bg-light">
+                              <Row>
+                                <Col md={5}>
+                                  <small className="text-primary fw-bold">Excel:</small>
+                                  <div className="font-monospace small">{dup.excel_name}</div>
+                                </Col>
+                                <Col md={2} className="text-center">
+                                  <Badge bg={dup.similarity_score >= 80 ? 'success' : dup.similarity_score >= 60 ? 'warning' : 'danger'}>
+                                    {dup.similarity_score}%
+                                  </Badge>
+                                </Col>
+                                <Col md={5}>
+                                  <small className="text-info fw-bold">Database:</small>
+                                  <div className="font-monospace small">{dup.db_name}</div>
+                                </Col>
+                              </Row>
+                            </div>
+                          ))}
+                        </div>
+                        <Button 
+                          variant="outline-warning" 
+                          size="sm" 
+                          onClick={() => setShowDuplicatesModal(true)}
+                          className="mt-2"
+                        >
+                          Manage Duplicates
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onClick={handleCloseScanModal}>
+                  Cancel
+                </Button>
+                {scanResults?.totalNewRecords > 0 && (
+                  <Button 
+                    variant="success" 
+                    onClick={handleUploadNewRecords}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <>
+                        <Spinner size="sm" animation="border" className="me-1" />
+                        Uploading...
+                      </>
+                    ) : (
+                      `Upload ${scanResults.totalNewRecords} New Records`
+                    )}
+                  </Button>
+                )}
+              </Modal.Footer>
+            </Modal>
+
+            {/* Duplicates Management Modal */}
+            <Modal show={showDuplicatesModal} onHide={() => setShowDuplicatesModal(false)} size="xl">
+              <Modal.Header closeButton>
+                <Modal.Title>Manage Duplicate Records</Modal.Title>
+              </Modal.Header>
+              <Modal.Body>
+                <p className="text-muted">Select duplicates to upload anyway (they will be marked with similarity scores):</p>
+                
+                <Form.Group className="mb-3">
+                  <Form.Label>Remarks for selected duplicates:</Form.Label>
+                  <Form.Control
+                    as="textarea"
+                    rows={2}
+                    value={duplicateRemarks}
+                    onChange={(e) => setDuplicateRemarks(e.target.value)}
+                    placeholder="Add remarks for why these duplicates should be uploaded..."
+                  />
+                </Form.Group>
+                
+                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                  {scanResults?.duplicates?.map((dup, idx) => (
+                    <div key={idx} className="border rounded p-3 mb-2">
+                      <Form.Check
+                        type="checkbox"
+                        id={`duplicate-${idx}`}
+                        label={`Upload this duplicate (${dup.similarity_score}% match)`}
+                        checked={selectedDuplicates.includes(idx)}
+                        onChange={() => toggleDuplicateSelection(idx)}
+                        className="mb-2"
+                      />
+                      <Row>
+                        <Col md={5}>
+                          <small className="text-primary fw-bold">Excel Record:</small>
+                          <div className="font-monospace small bg-light p-2 rounded">
+                            {dup.excel_name}
+                          </div>
+                        </Col>
+                        <Col md={2} className="text-center d-flex align-items-center justify-content-center">
+                          <Badge bg={dup.similarity_score >= 80 ? 'success' : dup.similarity_score >= 60 ? 'warning' : 'danger'} className="fs-6">
+                            {dup.similarity_score}%
+                          </Badge>
+                        </Col>
+                        <Col md={5}>
+                          <small className="text-info fw-bold">Database Match:</small>
+                          <div className="font-monospace small bg-light p-2 rounded">
+                            {dup.db_name}
+                          </div>
+                        </Col>
+                      </Row>
+                    </div>
+                  ))}
+                </div>
+              </Modal.Body>
+              <Modal.Footer>
+                <Button variant="secondary" onClick={() => setShowDuplicatesModal(false)}>
+                  Close
+                </Button>
+                {selectedDuplicates.length > 0 && (
+                  <Button 
+                    variant="warning" 
+                    onClick={handleUploadSelectedDuplicates}
+                    disabled={uploading}
+                  >
+                    {uploading ? (
+                      <>
+                        <Spinner size="sm" animation="border" className="me-1" />
+                        Uploading...
+                      </>
+                    ) : (
+                      `Upload ${selectedDuplicates.length} Selected Duplicates`
+                    )}
+                  </Button>
+                )}
+              </Modal.Footer>
+            </Modal>
 
             <hr />
 
