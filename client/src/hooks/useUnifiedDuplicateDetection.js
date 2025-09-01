@@ -5,14 +5,14 @@ export const useUnifiedDuplicateDetection = () => {
   const [duplicates, setDuplicates] = useState([]);
   const [filteredDuplicates, setFilteredDuplicates] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [similarityThreshold, setSimilarityThreshold] = useState(70);
+  const [similarityThreshold, setSimilarityThreshold] = useState(60);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const fuseSearch = useMemo(() => {
     return createUnifiedFuseSearch(duplicates);
   }, [duplicates]);
 
-  const detectDuplicates = useCallback(async (excelData, dbRecords, threshold = 70) => {
+  const detectDuplicates = useCallback(async (excelData, dbRecords, threshold = 60) => {
     setIsProcessing(true);
     try {
       const detectedDuplicates = detectDuplicatesUnified(excelData, dbRecords, threshold);
@@ -56,7 +56,7 @@ export const useUnifiedDuplicateDetection = () => {
     setDuplicates([]);
     setFilteredDuplicates([]);
     setSearchTerm('');
-    setSimilarityThreshold(70);
+    setSimilarityThreshold(60);
   }, []);
 
   return {

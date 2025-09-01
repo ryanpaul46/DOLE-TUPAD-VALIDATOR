@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
 const upload = multer({ 
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.xlsx', '.xls'];
@@ -50,7 +50,7 @@ const upload = multer({
 const handleMulterError = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: 'File too large', error: 'Maximum file size is 10MB' });
+      return res.status(400).json({ message: 'File too large', error: 'Maximum file size is 50MB' });
     }
     return res.status(400).json({ message: 'File upload error', error: err.message });
   }
@@ -146,6 +146,52 @@ router.post("/upload-excel", requireAuth, upload.single("excelFile"), handleMult
   } catch (err) {
     console.error("Upload error:", sanitizeForLog(err.message));
     res.status(500).json({ message: "File upload failed", error: "Internal server error" });
+  }
+});
+
+// Extract Excel data for client-side processing
+router.post("/get-excel-data", requireAuth, upload.single("excelFile"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+
+    // Read uploaded Excel file
+    const workbook = XLSX.readFile(req.file.path);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const excelData = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+    // Process Excel data to create proper name fields
+    const processedData = excelData.map((row, index) => {
+      // Create concatenated name from Excel data components
+      const excelNameParts = [
+        row["First Name"]?.toString().trim(),
+        row["Middle Name"]?.toString().trim(),
+        row["Last Name"]?.toString().trim(),
+        row["Ext. Name"]?.toString().trim()
+      ].filter(part => part && part.length > 0 && part !== 'null' && part !== 'undefined');
+      
+      const concatenatedName = excelNameParts.join(' ');
+      
+      // Use existing "Name" field from Excel, or use concatenated name if "Name" is empty
+      const nameToUse = (row["Name"]?.toString().trim() &&
+                        row["Name"].toString().trim() !== 'null' &&
+                        row["Name"].toString().trim() !== 'undefined')
+                       ? row["Name"].toString().trim()
+                       : concatenatedName;
+      
+      return {
+        ...row,
+        Name: nameToUse, // Ensure Name field is populated
+        row_number: index + 2 // +2 for header and 0-based index
+      };
+    });
+
+    res.json({
+      excelData: processedData,
+      totalRows: processedData.length
+    });
+  } catch (err) {
+    console.error("Excel data extraction error:", err);
+    res.status(500).json({ message: "Failed to extract Excel data", error: err.message });
   }
 });
 
