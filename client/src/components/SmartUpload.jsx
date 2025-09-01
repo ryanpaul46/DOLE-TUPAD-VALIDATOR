@@ -11,13 +11,14 @@ export default function SmartUpload({ data, onDataRefresh }) {
   const [scanResults, setScanResults] = useState(null);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [duplicateRemarks, setDuplicateRemarks] = useState({});
 
   const handleScan = async () => {
     if (!file) return;
 
     try {
       setScanning(true);
-      const results = await DuplicateDetectionService.scanFile(file, data, 60);
+      const results = await DuplicateDetectionService.scanFile(file, data, 83);
       setScanResults(results);
       setShowScanModal(true);
     } catch (error) {
@@ -30,16 +31,41 @@ export default function SmartUpload({ data, onDataRefresh }) {
   const handleUploadNew = async () => {
     try {
       setUploading(true);
-      await DuplicateDetectionService.uploadNewRecords(scanResults.newRecords);
+      
+      // Combine new records with duplicates that have remarks
+      const duplicatesWithRemarks = scanResults.duplicates
+        .filter(dup => duplicateRemarks[dup.excel_name]?.trim())
+        .map(dup => ({
+          ...dup.excel_data,
+          remarks: duplicateRemarks[dup.excel_name].trim()
+        }));
+      
+      const allRecordsToUpload = [...scanResults.newRecords, ...duplicatesWithRemarks];
+      
+      await DuplicateDetectionService.uploadNewRecords(allRecordsToUpload);
       onDataRefresh();
       setShowScanModal(false);
       setScanResults(null);
+      setDuplicateRemarks({});
       setFile(null);
     } catch (error) {
       console.error('Upload failed:', error);
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleRemarksChange = (excelName, remarks) => {
+    setDuplicateRemarks(prev => ({
+      ...prev,
+      [excelName]: remarks
+    }));
+  };
+
+  const getTotalRecordsToUpload = () => {
+    const newRecords = scanResults?.totalNewRecords || 0;
+    const duplicatesWithRemarks = Object.values(duplicateRemarks).filter(r => r?.trim()).length;
+    return newRecords + duplicatesWithRemarks;
   };
 
   return (
@@ -99,10 +125,13 @@ export default function SmartUpload({ data, onDataRefresh }) {
               {scanResults.totalDuplicates > 0 && (
                 <div className="mb-3">
                   <h6 className="text-warning">Possible Duplicates Detected:</h6>
-                  <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                  <p className="text-muted small mb-2">
+                    Add remarks to include duplicates in upload. Remarks are required to upload duplicates.
+                  </p>
+                  <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
                     {scanResults.duplicates.map((dup, idx) => (
-                      <div key={idx} className="border rounded p-2 mb-2 bg-light">
-                        <Row>
+                      <div key={idx} className="border rounded p-3 mb-2 bg-light">
+                        <Row className="mb-2">
                           <Col md={5}>
                             <small className="text-primary fw-bold">Excel:</small>
                             <div className="font-monospace small">{dup.excel_name}</div>
@@ -115,6 +144,17 @@ export default function SmartUpload({ data, onDataRefresh }) {
                           <Col md={5}>
                             <small className="text-info fw-bold">Database:</small>
                             <div className="font-monospace small">{dup.db_name}</div>
+                          </Col>
+                        </Row>
+                        <Row>
+                          <Col>
+                            <Form.Control
+                              type="text"
+                              placeholder="Add remarks to include this duplicate in upload (required)"
+                              value={duplicateRemarks[dup.excel_name] || ''}
+                              onChange={(e) => handleRemarksChange(dup.excel_name, e.target.value)}
+                              size="sm"
+                            />
                           </Col>
                         </Row>
                       </div>
@@ -137,7 +177,7 @@ export default function SmartUpload({ data, onDataRefresh }) {
           <Button variant="secondary" onClick={() => setShowScanModal(false)}>
             Cancel
           </Button>
-          {scanResults?.totalNewRecords > 0 && (
+          {getTotalRecordsToUpload() > 0 && (
             <Button 
               variant="success" 
               onClick={handleUploadNew}
@@ -149,7 +189,7 @@ export default function SmartUpload({ data, onDataRefresh }) {
                   Uploading...
                 </>
               ) : (
-                `Upload ${scanResults.totalNewRecords} New Records`
+                `Upload ${getTotalRecordsToUpload()} Records`
               )}
             </Button>
           )}

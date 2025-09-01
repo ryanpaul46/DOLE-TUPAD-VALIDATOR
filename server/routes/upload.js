@@ -106,11 +106,11 @@ router.post("/upload-excel", requireAuth, upload.single("excelFile"), handleMult
         `INSERT INTO uploaded_beneficiaries (
           project_series, id_number, name, first_name, middle_name, last_name, ext_name,
           birthdate, barangay, city_municipality, province, district, type_of_id, id_no,
-          contact_no, type_of_beneficiary, occupation, sex, civil_status, age, dependent
+          contact_no, type_of_beneficiary, occupation, sex, civil_status, age, dependent, remarks
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,
           $8,$9,$10,$11,$12,$13,$14,
-          $15,$16,$17,$18,$19,$20,$21
+          $15,$16,$17,$18,$19,$20,$21,$22
         )`,
         [
           row["Project Series"],
@@ -134,6 +134,7 @@ router.post("/upload-excel", requireAuth, upload.single("excelFile"), handleMult
           row["Civil Status"],
           row["Age"] ? parseInt(row["Age"]) : null,
           row["Dependent"],
+          row["Remarks"] || null,
         ]
       );
     }
@@ -545,11 +546,11 @@ router.post("/upload-new-records", requireAuth, async (req, res) => {
         `INSERT INTO uploaded_beneficiaries (
           project_series, id_number, name, first_name, middle_name, last_name, ext_name,
           birthdate, barangay, city_municipality, province, district, type_of_id, id_no,
-          contact_no, type_of_beneficiary, occupation, sex, civil_status, age, dependent
+          contact_no, type_of_beneficiary, occupation, sex, civil_status, age, dependent, remarks
         ) VALUES (
           $1,$2,$3,$4,$5,$6,$7,
           $8,$9,$10,$11,$12,$13,$14,
-          $15,$16,$17,$18,$19,$20,$21
+          $15,$16,$17,$18,$19,$20,$21,$22
         )`,
         [
           row["Project Series"],
@@ -573,6 +574,7 @@ router.post("/upload-new-records", requireAuth, async (req, res) => {
           row["Civil Status"],
           row["Age"] ? parseInt(row["Age"]) : null,
           row["Dependent"],
+          row["remarks"] || null,
         ]
       );
       insertedCount++;
