@@ -16,9 +16,14 @@ export default function Admin() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.get("/users/me");
+      const res = await api.get("/api/users/me");
       const data = res.data;
-      setAdmin({ firstName: data.first_name, lastName: data.last_name });
+      
+      // Extract name fields from API response
+      const firstName = data.first_name || 'User';
+      const lastName = data.last_name || '';
+      
+      setAdmin({ firstName, lastName });
     } catch (err) {
       setError(err.response?.data?.message || "Failed to fetch admin info.");
       if (err.response?.status === 401) {
@@ -56,7 +61,7 @@ export default function Admin() {
       {/* Welcome Section */}
       <Row className="mb-4">
         <Col>
-          <h2>Welcome, {admin.firstName} {admin.lastName}</h2>
+          <h2>Welcome, {admin.firstName} </h2>
           <p className="text-muted">Administrative dashboard with system statistics and management tools</p>
         </Col>
       </Row>

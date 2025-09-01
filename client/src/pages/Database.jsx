@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
-import { Container, Button, Spinner, Alert, Table, Pagination, InputGroup, Card, Row, Col, Form, Badge } from "react-bootstrap";
+import { Container, Button, Spinner, Alert, Card, Row, Col, Form, Badge } from "react-bootstrap";
 import { Upload, Trash3, Database as DatabaseIcon, FileEarmarkExcel } from "react-bootstrap-icons";
 import api from "../api/axios";
 import SmartUpload from "../components/SmartUpload";
@@ -11,21 +11,24 @@ export default function Database() {
   
   const [data, setData] = useState([]);
   const [columns, setColumns] = useState([]);
+  const [projectSeries, setProjectSeries] = useState([]);
+  const [selectedProject, setSelectedProject] = useState("");
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState("");
+
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [columnsRes, dataRes] = await Promise.all([
+      const [columnsRes, dataRes, projectRes] = await Promise.all([
         api.get("/api/uploaded-columns"),
-        api.get("/api/uploaded-beneficiaries")
+        api.get("/api/uploaded-beneficiaries"),
+        api.get("/api/beneficiaries-by-project-series")
       ]);
       setColumns(columnsRes.data.filter(col => col.column_name !== 'id'));
       setData(dataRes.data);
+      setProjectSeries(projectRes.data.projectSeries || []);
     } catch (err) {
       setError("Failed fetching database.");
     } finally {
@@ -75,34 +78,26 @@ export default function Database() {
       setLoading(false);
     }
   };
-  const filteredData = useMemo(() => {
-    if (!searchTerm) return data;
-    return data.filter(row => 
-      Object.values(row).some(value => 
-        value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    );
-  }, [data, searchTerm]);
 
-  const itemsPerPage = 20;
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
-  const paginatedData = filteredData.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
-
-  useEffect(() => setCurrentPage(1), [searchTerm]);
-
-  const formatColumnName = (name) => 
-    name.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-
-  const formatCellValue = (value, columnName) => {
-    if (value === null || value === undefined) return '';
-    if (columnName === 'birthdate' && value) {
-      return new Date(value).toLocaleDateString();
+  const handleDeleteProject = async () => {
+    if (!selectedProject) return setError("Please select a project series first");
+    
+    const projectName = projectSeries.find(p => p.project_series === selectedProject)?.project_series;
+    if (!window.confirm(`Are you sure you want to delete all records for "${projectName}"? This action cannot be undone.`)) return;
+    
+    try {
+      setLoading(true);
+      setError("");
+      await api.delete(`/api/delete-project-series/${encodeURIComponent(selectedProject)}`);
+      await fetchData();
+      setSelectedProject("");
+    } catch (err) {
+      setError("Failed to delete project series.");
+    } finally {
+      setLoading(false);
     }
-    return String(value);
   };
+
 
   return (
     <Container fluid className="p-4 flex-grow-1 overflow-auto">
@@ -180,6 +175,53 @@ export default function Database() {
               </Col>
             </Row>
             <hr className="my-4" />
+            
+            {/* Delete by Project Series */}
+            <Row className="mb-3">
+              <Col>
+                <Card className="border-danger">
+                  <Card.Header className="bg-light border-danger">
+                    <div className="d-flex align-items-center">
+                      <Trash3 className="me-2 text-danger" size={18} />
+                      <span className="fw-semibold text-danger">Delete by Project Series</span>
+                    </div>
+                  </Card.Header>
+                  <Card.Body>
+                    <div className="d-flex gap-2 align-items-center">
+                      <Form.Select
+                        value={selectedProject}
+                        onChange={(e) => setSelectedProject(e.target.value)}
+                        className="flex-grow-1"
+                        disabled={loading || projectSeries.length === 0}
+                      >
+                        <option value="">Select Project Series to Delete</option>
+                        {projectSeries.map((project, idx) => (
+                          <option key={idx} value={project.project_series}>
+                            {project.project_series} ({project.beneficiary_count} records)
+                          </option>
+                        ))}
+                      </Form.Select>
+                      <Button
+                        variant="danger"
+                        onClick={handleDeleteProject}
+                        disabled={loading || !selectedProject}
+                        className="d-flex align-items-center gap-1"
+                      >
+                        {loading ? (
+                          <Spinner size="sm" animation="border" />
+                        ) : (
+                          <>
+                            <Trash3 size={16} />
+                            Delete
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </Col>
+            </Row>
+            
             <div className="d-flex justify-content-between align-items-center">
               <div className="text-muted small">
                 <strong>Database Status:</strong> {data.length > 0 ? `${data.length} beneficiaries loaded` : 'No data'}
@@ -198,21 +240,7 @@ export default function Database() {
         </Card>
       )}
 
-      <InputGroup className="mb-4">
-        <Form.Control
-          type="text"
-          placeholder="Search database..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        {searchTerm && (
-          <Button variant="outline-secondary" onClick={() => setSearchTerm("")}>
-            Clear
-          </Button>
-        )}
-      </InputGroup>
-
-      {/* Loading / Error / No Data */}
+      {/* Loading / Error */}
       {loading && (
         <div className="d-flex justify-content-center my-4">
           <Spinner animation="border" />
@@ -221,64 +249,10 @@ export default function Database() {
       
       {error && <Alert variant="danger">{error}</Alert>}
       
-      {!loading && filteredData.length === 0 && !error && (
-        <Alert variant="info">
-          {searchTerm ? `No results found.` : "No data available."}
+      {!loading && !error && (
+        <Alert variant="success">
+          Database management completed. View beneficiaries in the Summary section.
         </Alert>
-      )}
-
-      {/* Data Display */}
-      {!loading && filteredData.length > 0 && (
-        <Row>
-          <Col>
-            <Card>
-              <Card.Header>List of Beneficiaries</Card.Header>
-              <Card.Body className="p-0">
-                <div className="table-container" style={{ maxHeight: "60vh", overflow: "auto" }}>
-                  <Table striped bordered hover size="sm" className="table-layout-auto mb-0">
-                    <thead className="position-sticky top-0 bg-light">
-                      <tr>
-                        {columns.map((col, idx) => (
-                          <th key={idx} className="align-middle">
-                            {formatColumnName(col.column_name)}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginatedData.map((row, rowIdx) => (
-                        <tr key={rowIdx}>
-                          {columns.map((col, colIdx) => (
-                            <td key={colIdx} className="align-middle">
-                              {formatCellValue(row[col.column_name], col.column_name)}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                </div>
-              </Card.Body>
-              {totalPages > 1 && (
-                <Card.Footer>
-                  <div className="d-flex justify-content-center">
-                    <Pagination size="sm">
-                      <Pagination.Prev
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(p => p - 1)}
-                      />
-                      <Pagination.Item active>{currentPage}</Pagination.Item>
-                      <Pagination.Next
-                        disabled={currentPage === totalPages}
-                        onClick={() => setCurrentPage(p => p + 1)}
-                      />
-                    </Pagination>
-                  </div>
-                </Card.Footer>
-              )}
-            </Card>
-          </Col>
-        </Row>
       )}
     </Container>
   );

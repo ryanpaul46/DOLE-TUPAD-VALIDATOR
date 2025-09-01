@@ -22,6 +22,9 @@ export default function DetectDuplicate() {
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
   const [useSimpleAlgorithm, setUseSimpleAlgorithm] = useState(false);
   const [selectedMatchType, setSelectedMatchType] = useState('ALL');
+  const [showProjectSeriesModal, setShowProjectSeriesModal] = useState(false);
+  const [projectSeriesInput, setProjectSeriesInput] = useState('');
+  const [pendingExcelData, setPendingExcelData] = useState(null);
   
   const { loading, error, compareResult, progress, compareFile, clearResults: clearFileResults } = useFileComparison();
   const {
@@ -38,6 +41,20 @@ export default function DetectDuplicate() {
 
   const handleFileChange = (e) => setFile(e.target.files[0]);
 
+  const checkProjectSeries = (data) => {
+    if (!data || data.length === 0) return true;
+    return data.some(row => row.project_series || row['Project Series'] || row['PROJECT SERIES']);
+  };
+
+  const addProjectSeriesToData = (data, projectSeries) => {
+    return data.map(row => ({
+      ...row,
+      project_series: projectSeries,
+      'Project Series': projectSeries,
+      'PROJECT SERIES': projectSeries
+    }));
+  };
+
   const handleCompare = async () => {
     const result = await compareFile(file);
     
@@ -52,10 +69,17 @@ export default function DetectDuplicate() {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         
+        let excelData = excelResponse.data.excelData || [];
+        
+        // Check if project series exists
+        if (!checkProjectSeries(excelData)) {
+          setPendingExcelData(excelData);
+          setShowProjectSeriesModal(true);
+          return;
+        }
+        
         // Get all database records
         const dbResponse = await api.get('/api/uploaded-beneficiaries');
-        
-        const excelData = excelResponse.data.excelData || [];
         const dbRecords = dbResponse.data || [];
         
         if (excelData.length > 0 && dbRecords.length > 0) {
@@ -74,6 +98,34 @@ export default function DetectDuplicate() {
         clearDuplicateResults();
         duplicates.splice(0, duplicates.length, ...serverDuplicates);
       }
+    }
+  };
+
+  const handleProjectSeriesSubmit = async () => {
+    if (!projectSeriesInput.trim()) {
+      alert('Please enter a project series');
+      return;
+    }
+
+    try {
+      const updatedExcelData = addProjectSeriesToData(pendingExcelData, projectSeriesInput.trim());
+      
+      // Get all database records
+      const dbResponse = await api.get('/api/uploaded-beneficiaries');
+      const dbRecords = dbResponse.data || [];
+      
+      if (updatedExcelData.length > 0 && dbRecords.length > 0) {
+        // Use unified detection for fuzzy matching
+        await detectDuplicates(updatedExcelData, dbRecords, similarityThreshold);
+      }
+      
+      // Close modal and reset states
+      setShowProjectSeriesModal(false);
+      setProjectSeriesInput('');
+      setPendingExcelData(null);
+    } catch (error) {
+      console.error('Error processing with project series:', error);
+      alert('Error processing file with project series');
     }
   };
 
@@ -304,6 +356,38 @@ export default function DetectDuplicate() {
         </>
       )}
 
+
+      {/* Project Series Input Modal */}
+      <Modal show={showProjectSeriesModal} onHide={() => setShowProjectSeriesModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Project Series Required</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p>The uploaded Excel file does not contain a project series. Please enter the project series for this data:</p>
+          <Form.Group className="mb-3">
+            <Form.Label>Project Series</Form.Label>
+            <Form.Control
+              type="text"
+              value={projectSeriesInput}
+              onChange={(e) => setProjectSeriesInput(e.target.value)}
+              placeholder="Enter project series (e.g., 2024-001)"
+              autoFocus
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => {
+            setShowProjectSeriesModal(false);
+            setProjectSeriesInput('');
+            setPendingExcelData(null);
+          }}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleProjectSeriesSubmit}>
+            Continue Detection
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Enhanced Duplicate Names Modal */}
       <Modal show={showDuplicatesModal} onHide={() => setShowDuplicatesModal(false)} size="xl">

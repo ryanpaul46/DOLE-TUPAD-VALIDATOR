@@ -4,6 +4,7 @@ import AdminUsers from "./pages/AdminUsers";
 import ClientMain from "./pages/Client";
 import Database from "./pages/Database";
 import DetectDuplicate from "./pages/DetectDuplicate";
+import SummaryofBeneficiaries from "./pages/SummaryofBeneficiaries";
 import Login from "./pages/Login";
 import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -21,6 +22,7 @@ function App() {
             <Route index element={<Admin />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="database" element={<Database />} />
+            <Route path="summary" element={<SummaryofBeneficiaries />} />
           </Route>
         </Route>
 
@@ -30,6 +32,7 @@ function App() {
             <Route index element={<ClientMain />} />
             <Route path="detect-duplicate" element={<DetectDuplicate />} />
             <Route path="database" element={<Database />} />
+            <Route path="summary" element={<SummaryofBeneficiaries />} />
           </Route>
         </Route>
 

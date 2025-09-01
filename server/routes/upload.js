@@ -360,6 +360,40 @@ router.delete("/uploaded-beneficiaries", requireAuth, async (req, res) => {
   }
 });
 
+// Delete beneficiaries by project series
+router.delete("/delete-project-series/:projectSeries", requireAuth, async (req, res) => {
+  try {
+    const { projectSeries } = req.params;
+    const decodedProjectSeries = decodeURIComponent(projectSeries);
+    
+    // Get count before deletion for confirmation
+    const countResult = await pool.query(
+      "SELECT COUNT(*) as count FROM uploaded_beneficiaries WHERE project_series = $1",
+      [decodedProjectSeries]
+    );
+    const deletedCount = parseInt(countResult.rows[0].count);
+    
+    if (deletedCount === 0) {
+      return res.status(404).json({ message: "Project series not found" });
+    }
+    
+    // Delete records
+    await pool.query(
+      "DELETE FROM uploaded_beneficiaries WHERE project_series = $1",
+      [decodedProjectSeries]
+    );
+    
+    await cacheService.clearAll(); // Clear cache after deletion
+    res.json({ 
+      message: `Successfully deleted ${deletedCount} records for project series: ${decodedProjectSeries}`,
+      deletedCount 
+    });
+  } catch (err) {
+    console.error("Failed to delete project series:", err);
+    res.status(500).json({ message: "Failed to delete project series", error: err.message });
+  }
+});
+
 router.delete("/uploaded-clear", requireAuth, async (req, res) => {
   try {
     await pool.query("DELETE FROM uploaded_beneficiaries");

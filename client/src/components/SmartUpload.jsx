@@ -11,7 +11,10 @@ export default function SmartUpload({ data, onDataRefresh }) {
   const [scanResults, setScanResults] = useState(null);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showDuplicatesModal, setShowDuplicatesModal] = useState(false);
+  const [showProjectSeriesModal, setShowProjectSeriesModal] = useState(false);
   const [duplicateRemarks, setDuplicateRemarks] = useState({});
+  const [missingProjectSeries, setMissingProjectSeries] = useState('');
+  const [pendingUploadData, setPendingUploadData] = useState(null);
 
   const handleScan = async () => {
     if (!file) return;
@@ -19,8 +22,20 @@ export default function SmartUpload({ data, onDataRefresh }) {
     try {
       setScanning(true);
       const results = await DuplicateDetectionService.scanFile(file, data, 83);
-      setScanResults(results);
-      setShowScanModal(true);
+      
+      // Check if project series is missing in the Excel data
+      const hasProjectSeries = results.newRecords?.some(record => 
+        record['Project Series'] && record['Project Series'].toString().trim() !== ''
+      );
+      
+      if (!hasProjectSeries && results.newRecords?.length > 0) {
+        // Show project series input modal
+        setScanResults(results);
+        setShowProjectSeriesModal(true);
+      } else {
+        setScanResults(results);
+        setShowScanModal(true);
+      }
     } catch (error) {
       console.error('Scan failed:', error);
     } finally {
@@ -28,30 +43,88 @@ export default function SmartUpload({ data, onDataRefresh }) {
     }
   };
 
-  const handleUploadNew = async () => {
+  const cleanRecordData = (record) => {
+    // Create a clean copy without circular references
+    const cleanRecord = {};
+    Object.keys(record).forEach(key => {
+      const value = record[key];
+      // Only include primitive values and avoid DOM elements/functions
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
+        cleanRecord[key] = value;
+      }
+    });
+    return cleanRecord;
+  };
+
+  const handleUploadNew = async (recordsToUpload = null) => {
     try {
       setUploading(true);
       
-      // Combine new records with duplicates that have remarks
-      const duplicatesWithRemarks = scanResults.duplicates
-        .filter(dup => duplicateRemarks[dup.excel_name]?.trim())
-        .map(dup => ({
-          ...dup.excel_data,
-          remarks: duplicateRemarks[dup.excel_name].trim()
-        }));
+      let allRecordsToUpload;
       
-      const allRecordsToUpload = [...scanResults.newRecords, ...duplicatesWithRemarks];
+      if (recordsToUpload && Array.isArray(recordsToUpload)) {
+        // Use provided records (from project series modal)
+        allRecordsToUpload = recordsToUpload.map(cleanRecordData);
+      } else {
+        // Combine new records with duplicates that have remarks
+        const duplicatesWithRemarks = (scanResults.duplicates || [])
+          .filter(dup => duplicateRemarks[dup.excel_name]?.trim())
+          .map(dup => cleanRecordData({
+            ...dup.excel_data,
+            remarks: duplicateRemarks[dup.excel_name].trim()
+          }));
+        
+        const cleanNewRecords = (scanResults.newRecords || []).map(cleanRecordData);
+        allRecordsToUpload = [...cleanNewRecords, ...duplicatesWithRemarks];
+      }
       
       await DuplicateDetectionService.uploadNewRecords(allRecordsToUpload);
       onDataRefresh();
       setShowScanModal(false);
+      setShowProjectSeriesModal(false);
       setScanResults(null);
       setDuplicateRemarks({});
+      setMissingProjectSeries('');
+      setPendingUploadData(null);
       setFile(null);
     } catch (error) {
       console.error('Upload failed:', error);
     } finally {
       setUploading(false);
+    }
+  };
+  
+  const handleProjectSeriesSubmit = () => {
+    if (!missingProjectSeries.trim()) return;
+    
+    // Add project series to all records
+    const updatedRecords = scanResults.newRecords.map(record => cleanRecordData({
+      ...record,
+      'Project Series': missingProjectSeries.trim()
+    }));
+    
+    // Check for duplicates with updated records
+    const duplicatesWithRemarks = scanResults.duplicates
+      .filter(dup => duplicateRemarks[dup.excel_name]?.trim())
+      .map(dup => cleanRecordData({
+        ...dup.excel_data,
+        'Project Series': missingProjectSeries.trim(),
+        remarks: duplicateRemarks[dup.excel_name].trim()
+      }));
+    
+    const allRecordsToUpload = [...updatedRecords, ...duplicatesWithRemarks];
+    
+    if (scanResults.totalDuplicates > 0) {
+      // Show scan modal for duplicate handling
+      setScanResults({
+        ...scanResults,
+        newRecords: updatedRecords
+      });
+      setShowProjectSeriesModal(false);
+      setShowScanModal(true);
+    } else {
+      // Upload directly
+      handleUploadNew(allRecordsToUpload);
     }
   };
 
@@ -193,6 +266,43 @@ export default function SmartUpload({ data, onDataRefresh }) {
               )}
             </Button>
           )}
+        </Modal.Footer>
+      </Modal>
+
+      {/* Project Series Input Modal */}
+      <Modal show={showProjectSeriesModal} onHide={() => setShowProjectSeriesModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Project Series Required</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <p className="text-warning mb-3">
+            <strong>No Project Series detected in the Excel file.</strong>
+          </p>
+          <p className="text-muted mb-3">
+            Please enter the Project Series for these {scanResults?.totalNewRecords || 0} records:
+          </p>
+          <Form.Group>
+            <Form.Label>Project Series:</Form.Label>
+            <Form.Control
+              type="text"
+              placeholder="Enter Project Series (e.g., TUPAD-2024-001)"
+              value={missingProjectSeries}
+              onChange={(e) => setMissingProjectSeries(e.target.value)}
+              autoFocus
+            />
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowProjectSeriesModal(false)}>
+            Cancel
+          </Button>
+          <Button 
+            variant="primary" 
+            onClick={handleProjectSeriesSubmit}
+            disabled={!missingProjectSeries.trim()}
+          >
+            Continue
+          </Button>
         </Modal.Footer>
       </Modal>
 

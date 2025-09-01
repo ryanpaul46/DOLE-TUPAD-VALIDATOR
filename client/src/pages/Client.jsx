@@ -4,6 +4,7 @@ import api from "../api/axios";
 
 export default function ClientDatabase() {
   const [data, setData] = useState([]);
+  const [client, setClient] = useState({ firstName: "" });
   const [uniqueCounts, setUniqueCounts] = useState({
     total_unique_municipalities: 0,
     total_unique_barangay: 0
@@ -19,16 +20,35 @@ export default function ClientDatabase() {
     }
   };
 
+  const fetchClientInfo = async () => {
+    try {
+      const res = await api.get("/api/users/me");
+      setClient({ firstName: res.data.first_name || 'User' });
+    } catch (err) {
+      console.error("Failed fetching client info:", err);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    fetchClientInfo();
   }, []);
 
   // Calculate totals for summary card
   const totalBeneficiaries = data.reduce((sum, item) => sum + parseInt(item.beneficiary_count), 0);
 
   return (
+    
     <Container fluid className="p-4 flex-grow-1 overflow-auto" style={{ minHeight: 0 }}>
-      <h2>Project Series Breakdown</h2>
+
+       {/* Welcome Section */}
+      <Row className="mb-4">
+        <Col>
+          <h2>Welcome, {client.firstName}</h2>
+          <p className="text-muted">Client dashboard with project series breakdown and beneficiary statistics</p>
+        </Col>
+      </Row>
+      <h3>Project Series Breakdown</h3>
       
       {/* Summary Cards */}
       <Row className="mb-4">

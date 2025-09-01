@@ -12,11 +12,13 @@ export default function Sidebar({ role, collapsed, setCollapsed }) {
           { label: "Dashboard", path: "/admin", icon: <FaTachometerAlt /> },
           { label: "Manage Users", path: "/admin/users", icon: <FaUsers /> },
           { label: "Database", path: "/admin/database", icon: <FaDatabase /> },
+          { label: "Summary of Beneficiaries", path: "/admin/summary", icon: <FaSearch /> },
         ]
       : [
           { label: "Client Dashboard", path: "/client", icon: <FaTachometerAlt /> },
           { label: "Detect Duplicate", path: "/client/detect-duplicate", icon: <FaSearch /> },
           { label: "Database", path: "/client/database", icon: <FaDatabase /> },
+          { label: "Summary of Beneficiaries", path: "/client/summary", icon: <FaSearch /> },
         ];
 
   // Handle toggle explicitly
@@ -28,7 +30,7 @@ export default function Sidebar({ role, collapsed, setCollapsed }) {
       onMouseEnter={() => setCollapsed(false)}
       onMouseLeave={() => setCollapsed(true)}
       style={{
-        width: collapsed ? "70px" : "220px",
+        width: collapsed ? "70px" : "250px",
         transition: "width 0.3s",
         height: "100vh",
         backgroundColor: "#f8f9fa",
