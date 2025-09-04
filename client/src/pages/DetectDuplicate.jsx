@@ -5,6 +5,7 @@ import ProgressTracker from "../components/ProgressTracker";
 import DuplicateTable from "../components/DuplicateTable";
 import OriginalsTable from "../components/OriginalsTable";
 import PossibleDuplicatesCard from "../components/PossibleDuplicatesCard";
+import LottieLoader from "../components/LottieLoader";
 import { useFileComparison } from "../hooks/useFileComparison";
 import { useUnifiedDuplicateDetection } from "../hooks/useUnifiedDuplicateDetection";
 import { getDisplayName } from "../utils/nameUtils";
@@ -226,7 +227,7 @@ export default function DetectDuplicate() {
               disabled={loading || isProcessing || !file}
               variant="primary"
             >
-              {(loading || isProcessing) ? <Spinner size="sm" animation="border" /> : "Detect Duplicates"}
+              {(loading || isProcessing) ? <LottieLoader size={20} /> : "Detect Duplicates"}
             </Button>
           
             <Button 
@@ -266,7 +267,7 @@ export default function DetectDuplicate() {
       {/* Loading / Error */}
       {loading && !progress.total && (
         <div className="d-flex justify-content-center my-4">
-          <Spinner animation="border" />
+          <LottieLoader size={80} />
         </div>
       )}
       

@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "concurrently": "^9.0.1",
+    "lottie-react": "^2.4.1",
     "multer": "^2.0.2",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

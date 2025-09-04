@@ -2,28 +2,40 @@ import { useState } from 'react';
 import api from '../api/axios';
 import { Form, Button, Card, Alert } from 'react-bootstrap';
 import { useNavigate } from 'react-router-dom';
+import LoadingScreen from './LoadingScreen';
 
 
 export default function LoginForm() {
 const [usernameOrEmail, setUE] = useState('');
 const [password, setPassword] = useState('');
 const [error, setError] = useState('');
+const [isLoading, setIsLoading] = useState(false);
 const navigate = useNavigate();
 
 
 async function handleSubmit(e) {
 e.preventDefault();
 setError('');
+setIsLoading(true);
 try {
 const { data } = await api.post('/auth/login', { username: usernameOrEmail, password });
 localStorage.setItem('token', data.token);
+
+// Show loading screen for 2 seconds before navigation
+setTimeout(() => {
 if (data.user.role === 'admin') navigate('/admin');
 else navigate('/client');
+}, 2000);
 } catch (e) {
+setIsLoading(false);
 setError(e?.response?.data?.message || 'Login failed');
 }
 }
 
+
+if (isLoading) {
+return <LoadingScreen message="Welcome! Preparing your dashboard..." />;
+}
 
 return (
 <Card className="shadow-lg">

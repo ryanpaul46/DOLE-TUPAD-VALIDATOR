@@ -1,5 +1,6 @@
 import React from 'react';
 import { ProgressBar, Card } from 'react-bootstrap';
+import LottieLoader from './LottieLoader';
 
 const ProgressTracker = ({ 
   progress = 0, 
@@ -95,8 +96,8 @@ const ProgressTracker = ({
         {status === 'processing' && (
           <div className="mt-2">
             <div className="d-flex align-items-center">
-              <div className="spinner-border spinner-border-sm me-2" role="status">
-                <span className="visually-hidden">Loading...</span>
+              <div style={{ width: '24px', height: '24px' }} className="me-2">
+                <LottieLoader size={24} />
               </div>
               <small className="text-muted">
                 {total > 0 ? `${formatNumber(total - processed)} rows remaining` : 'Processing...'}

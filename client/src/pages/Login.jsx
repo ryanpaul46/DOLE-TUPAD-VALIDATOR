@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
+import LoadingScreen from "../components/LoadingScreen";
 
 export default function Login() {
   const [form, setForm] = useState({ username: "", password: "", rememberMe: false });
   const [loading, setLoading] = useState(false);
+  const [showLoadingScreen, setShowLoadingScreen] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
@@ -30,23 +32,32 @@ export default function Login() {
       localStorage.setItem("role", user.role);
       localStorage.setItem("username", user.username);
 
-      if (user.role === "admin") navigate("/admin", { replace: true });
-      else if (user.role === "client") navigate("/client", { replace: true });
-      else setError("Unknown role, cannot redirect.");
+      setLoading(false);
+      setShowLoadingScreen(true);
+
+      // Show loading screen for 2 seconds before navigation
+      setTimeout(() => {
+        if (user.role === "admin") navigate("/admin", { replace: true });
+        else if (user.role === "client") navigate("/client", { replace: true });
+        else setError("Unknown role, cannot redirect.");
+      }, 5000);
     } catch (err) {
       setError(err.response?.data?.message || "Login failed");
-    } finally {
       setLoading(false);
     }
   };
+
+  if (showLoadingScreen) {
+    return <LoadingScreen message="Welcome! Preparing your dashboard..." />;
+  }
 
   return (
     <div className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh", backgroundColor: "#f8f9fa" }}>
       <div className="card p-4 shadow" style={{ width: "100%", maxWidth: "400px" }}>
         <div className="text-center mb-3">
-          <img src="/dole-logo.svg" alt="Site Logo" style={{ width: "80px", height: "80px", objectFit: "cover" }} />
+          <img src="/dole-logo-ro1.svg" alt="Site Logo" style={{ width: "120px", height: "120px", objectFit: "contain" }} />
         </div>
-        <h3 className="text-center mb-4">DOLE-TUPAD Validator</h3>
+        <h3 className="text-center mb-4">DOLE RO1 - TUPAD Validator</h3>
         <p className="tagline text-center">“Your easy way to check TUPAD records.”</p>
         <h1 className="h5 text-center mb-4">Login to your account</h1>
 
