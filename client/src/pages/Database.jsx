@@ -1,9 +1,12 @@
 import { useState, useEffect } from "react";
 import { useOutletContext } from "react-router-dom";
 import { Container, Button, Spinner, Alert, Card, Row, Col, Form, Badge } from "react-bootstrap";
-import { Upload, Trash3, Database as DatabaseIcon, FileEarmarkExcel } from "react-bootstrap-icons";
+import { Upload, Trash3, Database as DatabaseIcon, FileEarmarkExcel, Search } from "react-bootstrap-icons";
 import api from "../api/axios";
 import SmartUpload from "../components/SmartUpload";
+import GlobalSearch from "../components/search/GlobalSearch";
+import ExportButton from "../components/search/ExportButton";
+import { useGlobalSearch } from "../hooks/useGlobalSearch";
 
 export default function Database() {
   // Get role from outlet context
@@ -16,6 +19,16 @@ export default function Database() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
+  
+  const {
+    searchResults,
+    loading: searchLoading,
+    totalResults,
+    handleSearch,
+    handleFilter,
+    exportResults
+  } = useGlobalSearch();
 
 
   const fetchData = async () => {
@@ -249,9 +262,91 @@ export default function Database() {
       
       {error && <Alert variant="danger">{error}</Alert>}
       
+      {/* Search Section */}
+      <Card className="mb-4">
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <div className="d-flex align-items-center">
+            <Search className="me-2" size={20} />
+            <span className="fw-bold">Search & Export Data</span>
+          </div>
+          <Button
+            variant={showSearch ? "outline-secondary" : "primary"}
+            size="sm"
+            onClick={() => setShowSearch(!showSearch)}
+          >
+            {showSearch ? "Hide Search" : "Show Search"}
+          </Button>
+        </Card.Header>
+        {showSearch && (
+          <Card.Body>
+            <GlobalSearch
+              onSearch={handleSearch}
+              onFilter={handleFilter}
+              placeholder="Search all beneficiaries by name, ID, province..."
+            />
+            <div className="d-flex justify-content-between align-items-center mb-3">
+              <Badge bg="info">
+                {totalResults.toLocaleString()} results found
+              </Badge>
+              <ExportButton
+                data={searchResults}
+                filename="database_export"
+                onExport={async (data, filename, format) => {
+                  try {
+                    await exportResults(format);
+                  } catch (error) {
+                    console.error('Export failed:', error);
+                  }
+                }}
+                disabled={searchLoading || searchResults.length === 0}
+              />
+            </div>
+            {searchResults.length > 0 && (
+              <div className="table-responsive" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <table className="table table-striped table-sm">
+                  <thead className="table-dark sticky-top">
+                    <tr>
+                      <th>Name</th>
+                      <th>ID</th>
+                      <th>Province</th>
+                      <th>Municipality</th>
+                      <th>Project Series</th>
+                      <th>Gender</th>
+                      <th>Age</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResults.slice(0, 100).map((item, index) => (
+                      <tr key={item.id || index}>
+                        <td className="fw-bold">{item.name || 'N/A'}</td>
+                        <td>{item.id_number || 'N/A'}</td>
+                        <td>{item.province || 'N/A'}</td>
+                        <td>{item.city_municipality || 'N/A'}</td>
+                        <td>
+                          <Badge bg="primary" className="small">
+                            {item.project_series || 'N/A'}
+                          </Badge>
+                        </td>
+                        <td>{item.sex || 'N/A'}</td>
+                        <td>{item.age || 'N/A'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {searchResults.length > 100 && (
+                  <div className="text-center text-muted small mt-2">
+                    Showing first 100 results. Use export to get all {totalResults.toLocaleString()} results.
+                  </div>
+                )}
+              </div>
+            )}
+          </Card.Body>
+        )}
+      </Card>
+      
       {!loading && !error && (
         <Alert variant="success">
-          Database management completed. View beneficiaries in the Summary section.
+          Database management completed. Use search above to explore data or view Summary section.
         </Alert>
       )}
     </Container>

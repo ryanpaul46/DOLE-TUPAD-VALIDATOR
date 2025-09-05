@@ -1,8 +1,5 @@
-import express from "express";
 import { login } from "../controllers/authController.js";
 
-const router = express.Router();
-
-router.post("/login", login);
-
-export default router;
+export default async function authRoutes(fastify, options) {
+  fastify.post('/login', login);
+}

@@ -3,23 +3,27 @@ import { pool } from "../db.js";  // ✅ make sure this matches your db connecti
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { findUserByUsernameOrEmail } from "../models/userModel.js";
+import { generateCSRFToken } from "../middleware/csrfMiddleware.js";
 
 // Login
-export const login = async (req, res) => {
+export const login = async (request, reply) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = request.body;
     if (!username || !password) {
-      return res.status(400).json({ message: "Username and password are required" });
+      reply.code(400);
+      return { message: "Username and password are required" };
     }
 
     const user = await findUserByUsernameOrEmail(username);
     if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      reply.code(401);
+      return { message: "Invalid credentials" };
     }
 
-    const valid = await bcrypt.compare(password, user.password_hash); // ✅ using password_hash
+    const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
-      return res.status(401).json({ message: "Invalid credentials" });
+      reply.code(401);
+      return { message: "Invalid credentials" };
     }
 
     const token = jwt.sign(
@@ -28,8 +32,11 @@ export const login = async (req, res) => {
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
     );
 
-    res.json({
+    const csrfToken = generateCSRFToken(user.id);
+
+    return {
       token,
+      csrfToken,
       user: {
         id: user.id,
         username: user.username,
@@ -38,29 +45,32 @@ export const login = async (req, res) => {
         email: user.email,
         role: user.role,
       },
-    });
+    };
   } catch (err) {
     console.error("Login error:", err.message);
-    res.status(500).json({ message: "Server error during login" });
+    reply.code(500);
+    return { message: "Server error during login" };
   }
 };
 
 // Get current logged-in user
-export const me = async (req, res) => {
+export const me = async (request, reply) => {
   try {
-    const { id } = req.user;
+    const { id } = request.user;
     const { rows } = await pool.query(
       `SELECT id, first_name, last_name, username, email, role, created_at 
        FROM users WHERE id=$1`,
       [id]
     );
     if (!rows.length) {
-      return res.status(404).json({ message: "User not found" });
+      reply.code(404);
+      return { message: "User not found" };
     }
 
-    res.json(rows[0]);
+    return rows[0];
   } catch (err) {
     console.error("Me route error:", err.message);
-    res.status(500).json({ message: "Server error fetching user info" });
+    reply.code(500);
+    return { message: "Server error fetching user info" };
   }
 };

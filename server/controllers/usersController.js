@@ -9,31 +9,34 @@ const sanitizeForLog = (input) => {
 };
 
 // GET all users (don’t expose password_hash!)
-export const getAllUsers = async (req, res) => {
+export const getAllUsers = async (request, reply) => {
   try {
     const result = await pool.query(
       "SELECT id, username, first_name, last_name, email, role, created_at FROM users ORDER BY id ASC"
     );
-    res.json(result.rows);
+    return result.rows;
   } catch (err) {
     console.error("Error fetching users:", sanitizeForLog(err.message));
-    res.status(500).json({ message: "Failed to fetch users" });
+    reply.code(500);
+    return { message: "Failed to fetch users" };
   }
 };
 
 // CREATE new user
-export const createUser = async (req, res) => {
-  const { username, password, first_name, last_name, email, role } = req.body;
+export const createUser = async (request, reply) => {
+  const { username, password, first_name, last_name, email, role } = request.body;
 
   if (!username || !password || !first_name || !last_name || !email) {
-    return res.status(400).json({ message: "All fields are required" });
+    reply.code(400);
+    return { message: "All fields are required" };
   }
 
   try {
     // check if username exists
     const checkUser = await pool.query("SELECT id FROM users WHERE username=$1", [username]);
     if (checkUser.rows.length > 0) {
-      return res.status(400).json({ message: "Username already exists" });
+      reply.code(400);
+      return { message: "Username already exists" };
     }
 
     // hash password
@@ -47,17 +50,19 @@ export const createUser = async (req, res) => {
       [username, hashedPassword, first_name, last_name, email, role || "client"]
     );
 
-    res.status(201).json(result.rows[0]);
+    reply.code(201);
+    return result.rows[0];
   } catch (err) {
     console.error("Error creating user:", sanitizeForLog(err.message));
-    res.status(500).json({ message: "Failed to create user" });
+    reply.code(500);
+    return { message: "Failed to create user" };
   }
 };
 
 // UPDATE user (optionally update password)
-export const updateUser = async (req, res) => {
-  const { id } = req.params;
-  const { username, first_name, last_name, email, role, password } = req.body;
+export const updateUser = async (request, reply) => {
+  const { id } = request.params;
+  const { username, first_name, last_name, email, role, password } = request.body;
 
   try {
     // If password is provided, hash it
@@ -76,30 +81,34 @@ export const updateUser = async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
+      reply.code(404);
+      return { message: "User not found" };
     }
 
-    res.json(result.rows[0]);
+    return result.rows[0];
   } catch (err) {
     console.error("Error updating user:", sanitizeForLog(err.message));
-    res.status(500).json({ message: "Failed to update user" });
+    reply.code(500);
+    return { message: "Failed to update user" };
   }
 };
 
 // DELETE user
-export const deleteUser = async (req, res) => {
-  const { id } = req.params;
+export const deleteUser = async (request, reply) => {
+  const { id } = request.params;
 
   try {
     const result = await pool.query("DELETE FROM users WHERE id=$1 RETURNING id", [id]);
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
+      reply.code(404);
+      return { message: "User not found" };
     }
 
-    res.json({ message: "User deleted", id });
+    return { message: "User deleted", id };
   } catch (err) {
     console.error("Error deleting user:", sanitizeForLog(err.message));
-    res.status(500).json({ message: "Failed to delete user" });
+    reply.code(500);
+    return { message: "Failed to delete user" };
   }
 };

@@ -1,4 +1,3 @@
-import express from "express";
 import {
   getAllUsers,
   createUser,
@@ -8,38 +7,30 @@ import {
 import {requireAuth} from "../middleware/authMiddleware.js";
 import { pool } from "../db.js";
 
-const router = express.Router();
-
-// GET current logged-in user
-router.get("/me", requireAuth, async (req, res) => {
-  try {
-    // Fetch complete user data from database
-    const { rows } = await pool.query(
-      'SELECT id, first_name, last_name, username, email, role, created_at FROM users WHERE id = $1',
-      [req.user.id]
-    );
-    
-    if (rows.length === 0) {
-      return res.status(404).json({ message: "User not found" });
+export default async function usersRoutes(fastify, options) {
+  // GET current logged-in user
+  fastify.get('/me', { preHandler: requireAuth }, async (request, reply) => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT id, first_name, last_name, username, email, role, created_at FROM users WHERE id = $1',
+        [request.user.id]
+      );
+      
+      if (rows.length === 0) {
+        reply.code(404);
+        return { message: "User not found" };
+      }
+      
+      return rows[0];
+    } catch (err) {
+      console.error("Error in /me:", err);
+      reply.code(500);
+      return { message: "Failed to fetch user info" };
     }
-    
-    res.json(rows[0]);
-  } catch (err) {
-    console.error("Error in /me:", err);
-    res.status(500).json({ message: "Failed to fetch user info" });
-  }
-});
+  });
 
-// GET all users
-router.get("/", requireAuth, getAllUsers);
-
-// CREATE user
-router.post("/", requireAuth, createUser);
-
-// UPDATE user
-router.put("/:id", requireAuth, updateUser);
-
-// DELETE user
-router.delete("/:id", requireAuth, deleteUser);
-
-export default router;
+  fastify.get('/', { preHandler: requireAuth }, getAllUsers);
+  fastify.post('/', { preHandler: requireAuth }, createUser);
+  fastify.put('/:id', { preHandler: requireAuth }, updateUser);
+  fastify.delete('/:id', { preHandler: requireAuth }, deleteUser);
+}

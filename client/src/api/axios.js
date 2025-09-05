@@ -33,6 +33,16 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
     
+    const csrfToken = localStorage.getItem("csrfToken");
+    if (csrfToken && ['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase())) {
+      config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    
+    // Handle multipart form data
+    if (config.data instanceof FormData && csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    
     // Enhanced logging for development
     if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOGGING === 'true') {
       console.log(`🔄 API Request: ${sanitizeForLog(config.method?.toUpperCase())} ${sanitizeForLog(config.baseURL)}${sanitizeForLog(config.url)}`);

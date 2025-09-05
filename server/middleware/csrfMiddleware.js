@@ -1,27 +1,25 @@
 import crypto from 'crypto';
 
-// Simple CSRF protection middleware
-export const csrfProtection = (req, res, next) => {
-  // Skip CSRF for GET requests
-  if (req.method === 'GET') {
-    return next();
-  }
+const csrfTokens = new Map();
 
-  // Check for CSRF token in headers
-  const token = req.headers['x-csrf-token'];
-  const sessionToken = req.session?.csrfToken;
-
-  if (!token || !sessionToken || token !== sessionToken) {
-    return res.status(403).json({ 
-      message: 'CSRF token validation failed',
-      error: 'Invalid or missing CSRF token'
-    });
-  }
-
-  next();
+export const generateCSRFToken = (userId) => {
+  const token = crypto.randomBytes(32).toString('hex');
+  csrfTokens.set(userId, token);
+  return token;
 };
 
-// Generate CSRF token
-export const generateCSRFToken = () => {
-  return crypto.randomBytes(32).toString('hex');
+export const validateCSRF = async (request, reply) => {
+  const token = request.headers['x-csrf-token'];
+  const userId = request.user?.id;
+  
+  if (!token || !userId) {
+    reply.code(403);
+    throw new Error('Invalid CSRF token');
+  }
+  
+  const storedToken = csrfTokens.get(userId);
+  if (!storedToken || storedToken !== token) {
+    reply.code(403);
+    throw new Error('Invalid CSRF token');
+  }
 };

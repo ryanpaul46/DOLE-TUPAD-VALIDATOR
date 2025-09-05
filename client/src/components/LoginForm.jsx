@@ -20,6 +20,7 @@ setIsLoading(true);
 try {
 const { data } = await api.post('/auth/login', { username: usernameOrEmail, password });
 localStorage.setItem('token', data.token);
+localStorage.setItem('csrfToken', data.csrfToken);
 
 // Show loading screen for 2 seconds before navigation
 setTimeout(() => {

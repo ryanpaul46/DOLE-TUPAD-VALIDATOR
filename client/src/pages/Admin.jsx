@@ -1,25 +1,35 @@
-import { useState, useEffect } from "react";
-import { Container, Row, Col, Button, Spinner, Alert, Card, Badge, ProgressBar } from "react-bootstrap";
+import { useState, useEffect, useCallback } from "react";
+import { Container, Row, Col, Button, Alert, Card, Badge, Tabs, Tab } from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
-import { People, FileEarmark, GeoAlt, Calendar, PieChart, BarChart } from "react-bootstrap-icons";
+import { People, FileEarmark, GeoAlt, Calendar, PieChart, BarChart, ArrowClockwise, Activity, GraphUp, Search } from "react-bootstrap-icons";
 import api from "../api/axios";
+import { StatCardSkeleton, ChartSkeleton, RefreshIndicator, LastUpdated } from "../components/LoadingSkeleton";
+import { useToast } from "../hooks/useToast";
+import { useRealTimeStats } from "../hooks/useRealTimeStats";
+import AnalyticsDashboard from "../components/charts/AnalyticsDashboard";
+import ToastContainer from "../components/ToastContainer";
 
 export default function Admin() {
   const [admin, setAdmin] = useState({ firstName: "", lastName: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statistics, setStatistics] = useState(null);
-  const [statsLoading, setStatsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const navigate = useNavigate();
+  const { toasts, showToast, removeToast } = useToast();
+  const { statistics, loading: statsLoading, error: statsError, lastUpdated, refreshStats } = useRealTimeStats(30000);
 
-  const fetchAdminInfo = async () => {
+  const calculatePercentage = (count, total) => {
+    return total > 0 ? (count / total * 100) : 0;
+  };
+
+  const fetchAdminInfo = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const res = await api.get("/api/users/me");
       const data = res.data;
       
-      // Extract name fields from API response
       const firstName = data.first_name || 'User';
       const lastName = data.last_name || '';
       
@@ -33,250 +43,307 @@ export default function Admin() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [navigate]);
 
-  const fetchStatistics = async () => {
+  const handleManualRefresh = useCallback(async () => {
+    setIsRefreshing(true);
     try {
-      setStatsLoading(true);
-      const res = await api.get("/api/admin-statistics");
-      setStatistics(res.data);
+      await refreshStats();
+      showToast("Statistics refreshed", "success");
     } catch (err) {
-      console.error("Failed to fetch statistics:", err);
+      showToast("Failed to refresh statistics", "danger");
     } finally {
-      setStatsLoading(false);
+      setIsRefreshing(false);
     }
-  };
+  }, [refreshStats, showToast]);
 
   useEffect(() => {
     fetchAdminInfo();
-    fetchStatistics();
-  }, []);
+  }, [fetchAdminInfo]);
 
-  if (loading) return <Container className="d-flex justify-content-center align-items-center" style={{ minHeight: "100vh" }}><Spinner animation="border" /></Container>;
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (e.ctrlKey && e.key === 'r') {
+        e.preventDefault();
+        handleManualRefresh();
+      }
+    };
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [handleManualRefresh]);
+
+  const handleExportData = useCallback((data, filename) => {
+    try {
+      const jsonData = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${filename}_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('Data exported successfully', 'success');
+    } catch (error) {
+      showToast('Failed to export data', 'danger');
+    }
+  }, [showToast]);
+
+  if (loading) {
+    return (
+      <Container fluid className="p-4">
+        <Row className="mb-4">
+          {[...Array(4)].map((_, i) => (
+            <Col md={3} key={i} className="mb-3">
+              <StatCardSkeleton />
+            </Col>
+          ))}
+        </Row>
+        <Row>
+          <Col lg={6}><ChartSkeleton /></Col>
+          <Col lg={6}><ChartSkeleton /></Col>
+        </Row>
+      </Container>
+    );
+  }
 
   return (
     <Container fluid className="p-4">
+      <ToastContainer toasts={toasts} onClose={removeToast} />
       {error && <Alert variant="danger">{error}</Alert>}
+      {statsError && <Alert variant="warning">{statsError}</Alert>}
       
       {/* Welcome Section */}
       <Row className="mb-4">
         <Col>
-          <h2>Welcome, {admin.firstName} </h2>
-          <p className="text-muted">Administrative dashboard with system statistics and management tools</p>
+          <div className="d-flex justify-content-between align-items-center">
+            <div>
+              <h2>Welcome, {admin.firstName} </h2>
+              <p className="text-muted mb-1">Administrative dashboard with system statistics and management tools</p>
+              <LastUpdated timestamp={lastUpdated} />
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              <RefreshIndicator isRefreshing={isRefreshing || statsLoading} />
+              <Button 
+                variant="outline-primary" 
+                size="sm" 
+                onClick={handleManualRefresh}
+                disabled={isRefreshing || statsLoading}
+              >
+                <ArrowClockwise className={isRefreshing ? "spin" : ""} />
+              </Button>
+            </div>
+          </div>
         </Col>
       </Row>
 
       {/* Main Statistics Cards */}
       <Row className="mb-4">
         <Col md={3} className="mb-3">
-          <Card className="h-100 text-center border-primary">
-            <Card.Body>
-              <People size={40} className="text-primary mb-2" />
-              <h4 className="text-primary">
-                {statsLoading ? <Spinner size="sm" /> : statistics?.totalBeneficiaries?.toLocaleString() || 0}
-              </h4>
-              <small className="text-muted">Total Beneficiaries</small>
-            </Card.Body>
-          </Card>
+          {statsLoading ? (
+            <StatCardSkeleton variant="primary" />
+          ) : (
+            <Card className="h-100 text-center border-primary">
+              <Card.Body>
+                <People size={40} className="text-primary mb-2" />
+                <h4 className="text-primary">
+                  {statistics?.totalBeneficiaries?.toLocaleString() || 0}
+                </h4>
+                <small className="text-muted">Total Beneficiaries</small>
+              </Card.Body>
+            </Card>
+          )}
         </Col>
         <Col md={3} className="mb-3">
-          <Card className="h-100 text-center border-success">
-            <Card.Body>
-              <FileEarmark size={40} className="text-success mb-2" />
-              <h4 className="text-success">
-                {statsLoading ? <Spinner size="sm" /> : statistics?.totalUsers || 0}
-              </h4>
-              <small className="text-muted">System Users</small>
-            </Card.Body>
-          </Card>
+          {statsLoading ? (
+            <StatCardSkeleton variant="success" />
+          ) : (
+            <Card className="h-100 text-center border-success">
+              <Card.Body>
+                <FileEarmark size={40} className="text-success mb-2" />
+                <h4 className="text-success">
+                  {statistics?.totalUsers || 0}
+                </h4>
+                <small className="text-muted">System Users</small>
+              </Card.Body>
+            </Card>
+          )}
         </Col>
         <Col md={3} className="mb-3">
-          <Card className="h-100 text-center border-info">
-            <Card.Body>
-              <GeoAlt size={40} className="text-info mb-2" />
-              <h4 className="text-info">
-                {statsLoading ? <Spinner size="sm" /> : statistics?.provinces?.length || 0}
-              </h4>
-              <small className="text-muted">Provinces Covered</small>
-            </Card.Body>
-          </Card>
+          {statsLoading ? (
+            <StatCardSkeleton variant="info" />
+          ) : (
+            <Card className="h-100 text-center border-info">
+              <Card.Body>
+                <GeoAlt size={40} className="text-info mb-2" />
+                <h4 className="text-info">
+                  {statistics?.provinces?.length || 0}
+                </h4>
+                <small className="text-muted">Provinces Covered</small>
+              </Card.Body>
+            </Card>
+          )}
         </Col>
         <Col md={3} className="mb-3">
-          <Card className="h-100 text-center border-warning">
-            <Card.Body>
-              <BarChart size={40} className="text-warning mb-2" />
-              <h4 className="text-warning">
-                {statsLoading ? <Spinner size="sm" /> : statistics?.totalProjectSeries || 0}
-              </h4>
-              <small className="text-muted">Project Series</small>
-            </Card.Body>
-          </Card>
+          {statsLoading ? (
+            <StatCardSkeleton variant="warning" />
+          ) : (
+            <Card className="h-100 text-center border-warning">
+              <Card.Body>
+                <BarChart size={40} className="text-warning mb-2" />
+                <h4 className="text-warning">
+                  {statistics?.totalProjectSeries || 0}
+                </h4>
+                <small className="text-muted">Project Series</small>
+              </Card.Body>
+            </Card>
+          )}
         </Col>
       </Row>
 
-      {/* Detailed Statistics */}
-      <Row className="mb-4">
-        {/* Project Series Breakdown */}
-        <Col lg={6} className="mb-4">
-          <Card>
-            <Card.Header>
-              <strong><FileEarmark className="me-2" />Top Project Series</strong>
-            </Card.Header>
-            <Card.Body>
-              {statsLoading ? (
-                <div className="text-center p-3">
-                  <Spinner animation="border" />
-                </div>
-              ) : (
-                <div>
-                  {statistics?.projectSeries?.slice(0, 5).map((item, idx) => {
-                    const percentage = statistics.totalBeneficiaries > 0
-                      ? (item.count / statistics.totalBeneficiaries * 100)
-                      : 0;
-                    return (
-                      <div key={idx} className="mb-3">
-                        <div className="d-flex justify-content-between mb-1">
-                          <small className="fw-bold">{item.project_series || 'Unknown'}</small>
-                          <Badge bg="primary">{item.count.toLocaleString()}</Badge>
-                        </div>
-                        <ProgressBar
-                          now={percentage}
-                          variant="primary"
-                          style={{ height: '6px' }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-
-        {/* Top Provinces */}
-        <Col lg={6} className="mb-4">
-          <Card>
-            <Card.Header>
-              <strong><GeoAlt className="me-2" />Top Provinces</strong>
-            </Card.Header>
-            <Card.Body>
-              {statsLoading ? (
-                <div className="text-center p-3">
-                  <Spinner animation="border" />
-                </div>
-              ) : (
-                <div>
-                  {statistics?.provinces?.slice(0, 5).map((item, idx) => {
-                    const percentage = statistics.totalBeneficiaries > 0
-                      ? (item.count / statistics.totalBeneficiaries * 100)
-                      : 0;
-                    return (
-                      <div key={idx} className="mb-3">
-                        <div className="d-flex justify-content-between mb-1">
-                          <small className="fw-bold">{item.province || 'Unknown'}</small>
-                          <Badge bg="info">{item.count.toLocaleString()}</Badge>
-                        </div>
-                        <ProgressBar
-                          now={percentage}
-                          variant="info"
-                          style={{ height: '6px' }}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Demographics and Age Statistics */}
-      <Row className="mb-4">
-        <Col lg={6} className="mb-4">
-          <Card>
-            <Card.Header>
-              <strong><PieChart className="me-2" />Gender Distribution</strong>
-            </Card.Header>
-            <Card.Body>
-              {statsLoading ? (
-                <div className="text-center p-3">
-                  <Spinner animation="border" />
-                </div>
-              ) : (
-                <Row>
-                  {statistics?.genderDistribution?.map((item, idx) => (
-                    <Col md={6} key={idx} className="text-center mb-3">
-                      <h4 className={idx === 0 ? "text-primary" : "text-success"}>
-                        {item.count.toLocaleString()}
-                      </h4>
-                      <small className="text-muted">{item.sex || 'Unknown'}</small>
-                    </Col>
-                  ))}
-                </Row>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-
-        <Col lg={6} className="mb-4">
-          <Card>
-            <Card.Header>
-              <strong><Calendar className="me-2" />Age Statistics</strong>
-            </Card.Header>
-            <Card.Body>
-              {statsLoading ? (
-                <div className="text-center p-3">
-                  <Spinner animation="border" />
-                </div>
-              ) : statistics?.ageStats ? (
-                <Row>
-                  <Col md={4} className="text-center mb-3">
-                    <h5 className="text-primary">{Math.round(statistics.ageStats.avg_age || 0)}</h5>
-                    <small className="text-muted">Average Age</small>
-                  </Col>
-                  <Col md={4} className="text-center mb-3">
-                    <h5 className="text-success">{statistics.ageStats.min_age || 0}</h5>
-                    <small className="text-muted">Minimum Age</small>
-                  </Col>
-                  <Col md={4} className="text-center mb-3">
-                    <h5 className="text-warning">{statistics.ageStats.max_age || 0}</h5>
-                    <small className="text-muted">Maximum Age</small>
-                  </Col>
-                </Row>
-              ) : (
-                <p className="text-muted text-center">No age data available</p>
-              )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+      {/* Analytics Tabs */}
+      <Tabs 
+        activeKey={activeTab} 
+        onSelect={setActiveTab} 
+        className="mb-4"
+        fill
+      >
+        <Tab 
+          eventKey="overview" 
+          title={
+            <span>
+              <Activity className="me-2" size={16} />
+              Overview
+            </span>
+          }
+        >
+          {/* Quick Stats Cards */}
+          <Row className="mb-4">
+            <Col lg={3} className="mb-3">
+              <Card className="text-center border-primary h-100">
+                <Card.Body>
+                  <div className="h3 text-primary mb-2">
+                    {statistics?.projectSeries?.length || 0}
+                  </div>
+                  <small className="text-muted">Active Project Series</small>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col lg={3} className="mb-3">
+              <Card className="text-center border-success h-100">
+                <Card.Body>
+                  <div className="h3 text-success mb-2">
+                    {statistics?.provinces?.length || 0}
+                  </div>
+                  <small className="text-muted">Covered Provinces</small>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col lg={3} className="mb-3">
+              <Card className="text-center border-info h-100">
+                <Card.Body>
+                  <div className="h3 text-info mb-2">
+                    {statistics?.genderDistribution?.length || 0}
+                  </div>
+                  <small className="text-muted">Gender Categories</small>
+                </Card.Body>
+              </Card>
+            </Col>
+            <Col lg={3} className="mb-3">
+              <Card className="text-center border-warning h-100">
+                <Card.Body>
+                  <div className="h3 text-warning mb-2">
+                    {Math.round(statistics?.ageStats?.avg_age || 0)}
+                  </div>
+                  <small className="text-muted">Average Age</small>
+                </Card.Body>
+              </Card>
+            </Col>
+          </Row>
+        </Tab>
+        
+        <Tab 
+          eventKey="analytics" 
+          title={
+            <span>
+              <GraphUp className="me-2" size={16} />
+              Interactive Analytics
+            </span>
+          }
+        >
+          {!statsLoading && statistics ? (
+            <AnalyticsDashboard 
+              statistics={statistics} 
+              onExportData={handleExportData}
+            />
+          ) : (
+            <Row>
+              <Col lg={6}><ChartSkeleton /></Col>
+              <Col lg={6}><ChartSkeleton /></Col>
+            </Row>
+          )}
+        </Tab>
+      </Tabs>
 
       {/* Action Buttons */}
-      <Row>
-        <Col md={6} className="mb-3">
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-100"
-            onClick={() => navigate("/admin/users")}
-          >
-            <People className="me-2" />
-            Manage Users
-          </Button>
-        </Col>
-        <Col md={6} className="mb-3">
-          <Button
-            variant="secondary"
-            size="lg"
-            className="w-100"
-            onClick={() => navigate("/admin/database")}
-          >
-            <FileEarmark className="me-2" />
-            View Database
-          </Button>
-        </Col>
-      </Row>
+      {activeTab === 'overview' && (
+        <Row>
+          <Col md={3} className="mb-3">
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-100"
+              onClick={() => {
+                navigate("/admin/users");
+                showToast("Navigating to user management", "info");
+              }}
+            >
+              <People className="me-2" />
+              Manage Users
+            </Button>
+          </Col>
+          <Col md={3} className="mb-3">
+            <Button
+              variant="secondary"
+              size="lg"
+              className="w-100"
+              onClick={() => {
+                navigate("/admin/database");
+                showToast("Navigating to database view", "info");
+              }}
+            >
+              <FileEarmark className="me-2" />
+              View Database
+            </Button>
+          </Col>
+          <Col md={3} className="mb-3">
+            <Button
+              variant="info"
+              size="lg"
+              className="w-100"
+              onClick={() => {
+                navigate("/admin/search");
+                showToast("Navigating to search", "info");
+              }}
+            >
+              <Search className="me-2" />
+              Search Data
+            </Button>
+          </Col>
+          <Col md={3} className="mb-3">
+            <Button
+              variant="success"
+              size="lg"
+              className="w-100"
+              onClick={() => setActiveTab('analytics')}
+            >
+              <GraphUp className="me-2" />
+              View Analytics
+            </Button>
+          </Col>
+        </Row>
+      )}
     </Container>
   );
 }
