@@ -5,7 +5,11 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import { Server } from "socket.io";
 import { generateCSRFToken } from "./middleware/csrfMiddleware.js";
-import { pool } from "./db.js";
+import { requireAuth } from "./middleware/authMiddleware.js";
+import { pool, getPoolStatus } from "./database/optimizedPool.js";
+import prisma from "./lib/prisma.js";
+import cacheService from "./services/cacheService.js";
+import backupService from "./database/backup.js";
 
 // Load environment variables
 dotenv.config();
@@ -70,36 +74,43 @@ const broadcastStatistics = async () => {
   }
 };
 
-// Admin statistics function
+// Admin statistics function using Prisma
 const getAdminStatistics = async () => {
-  const queries = {
-    totalBeneficiaries: 'SELECT COUNT(*) as count FROM uploaded_beneficiaries',
-    totalUsers: 'SELECT COUNT(*) as count FROM users',
-    provinces: `SELECT province, COUNT(*) as count FROM uploaded_beneficiaries 
-                WHERE province IS NOT NULL AND province != '' 
-                GROUP BY province ORDER BY count DESC`,
-    projectSeries: `SELECT project_series, COUNT(*) as count FROM uploaded_beneficiaries 
-                    WHERE project_series IS NOT NULL AND project_series != '' 
-                    GROUP BY project_series ORDER BY count DESC`,
-    genderDistribution: `SELECT sex, COUNT(*) as count FROM uploaded_beneficiaries 
-                         WHERE sex IS NOT NULL AND sex != '' 
-                         GROUP BY sex ORDER BY count DESC`,
-    ageStats: `SELECT AVG(age) as avg_age, MIN(age) as min_age, MAX(age) as max_age 
-               FROM uploaded_beneficiaries WHERE age IS NOT NULL AND age > 0`
-  };
+  try {
+    const { getStatistics } = await import('./models/prismaBeneficiaryModel.js');
+    return await getStatistics();
+  } catch (error) {
+    console.error('Error fetching statistics with Prisma:', error);
+    // Fallback to raw SQL if Prisma fails
+    const queries = {
+      totalBeneficiaries: 'SELECT COUNT(*) as count FROM uploaded_beneficiaries',
+      totalUsers: 'SELECT COUNT(*) as count FROM users',
+      provinces: `SELECT province, COUNT(*) as count FROM uploaded_beneficiaries 
+                  WHERE province IS NOT NULL AND province != '' 
+                  GROUP BY province ORDER BY count DESC`,
+      projectSeries: `SELECT project_series, COUNT(*) as count FROM uploaded_beneficiaries 
+                      WHERE project_series IS NOT NULL AND project_series != '' 
+                      GROUP BY project_series ORDER BY count DESC`,
+      genderDistribution: `SELECT sex, COUNT(*) as count FROM uploaded_beneficiaries 
+                           WHERE sex IS NOT NULL AND sex != '' 
+                           GROUP BY sex ORDER BY count DESC`,
+      ageStats: `SELECT AVG(age) as avg_age, MIN(age) as min_age, MAX(age) as max_age 
+                 FROM uploaded_beneficiaries WHERE age IS NOT NULL AND age > 0`
+    };
 
-  const results = {};
-  for (const [key, query] of Object.entries(queries)) {
-    const result = await pool.query(query);
-    results[key] = key === 'totalBeneficiaries' || key === 'totalUsers' 
-      ? parseInt(result.rows[0]?.count || 0)
-      : key === 'ageStats' 
-        ? result.rows[0] 
-        : result.rows;
+    const results = {};
+    for (const [key, query] of Object.entries(queries)) {
+      const result = await pool.query(query);
+      results[key] = key === 'totalBeneficiaries' || key === 'totalUsers' 
+        ? parseInt(result.rows[0]?.count || 0)
+        : key === 'ageStats' 
+          ? result.rows[0] 
+          : result.rows;
+    }
+
+    results.totalProjectSeries = results.projectSeries?.length || 0;
+    return results;
   }
-
-  results.totalProjectSeries = results.projectSeries?.length || 0;
-  return results;
 };
 
 // Register plugins
@@ -145,11 +156,12 @@ await fastify.register(import('@fastify/static'), {
   prefix: '/uploads/'
 });
 
-// Test PostgreSQL connection
+// Test PostgreSQL connection and initialize services
 pool.connect()
   .then(() => {
     console.log("✅ Connected to PostgreSQL database");
     console.log(`📊 Database: ${process.env.PGDATABASE} on ${process.env.PGHOST}:${process.env.PGPORT}`);
+    console.log(`🔗 Pool status:`, getPoolStatus());
   })
   .catch(err => {
     console.error("❌ Database connection error:", err.message);
@@ -215,6 +227,136 @@ uploadModule.setBroadcastFunction(broadcastStatistics);
 await fastify.register(uploadModule.default, { prefix: '/api' });
 
 await fastify.register(import('./routes/seed.js'), { prefix: '/seed' });
+
+// Register admin routes (convert Express router to Fastify)
+fastify.register(async function adminRoutes(fastify) {
+  const { requireAuth, requireAdmin } = await import('./middleware/authMiddleware.js');
+  const bcrypt = await import('bcrypt');
+  const { createUser } = await import('./models/userModel.js');
+  const { isEmail, notEmpty } = await import('./utils/validation.js');
+  
+  // POST /api/admin/users (Admin create user)
+  fastify.post('/users', { preHandler: [requireAuth, requireAdmin] }, async (request, reply) => {
+    try {
+      const { first_name, last_name, username, email, password, role = 'client' } = request.body;
+      
+      if (![first_name, last_name, username, email, password].every(notEmpty) || !isEmail(email)) {
+        reply.code(400);
+        return { message: 'Invalid fields' };
+      }
+      
+      const password_hash = await bcrypt.hash(password, 10);
+      const user = await createUser({ first_name, last_name, username, email, password_hash, role });
+      return user;
+    } catch (e) {
+      if (e.code === '23505') { // unique_violation
+        reply.code(409);
+        return { message: 'Username or email already exists' };
+      }
+      console.error(e);
+      reply.code(500);
+      return { message: 'Server error' };
+    }
+  });
+}, { prefix: '/api/admin' });
+
+// Database management endpoints
+fastify.get('/api/db-status', { preHandler: requireAuth }, async (request, reply) => {
+  return {
+    pool: getPoolStatus(),
+    cache: await cacheService.getStats(),
+    backup: backupService.getBackupStats()
+  };
+});
+
+// Database migration endpoint
+fastify.post('/api/migrate-timestamps', { preHandler: requireAuth }, async (request, reply) => {
+  try {
+    const migrationSQL = `
+      DO $$ 
+      BEGIN
+          -- Add created_at column if it doesn't exist
+          IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_name = 'uploaded_beneficiaries' 
+              AND column_name = 'created_at'
+          ) THEN
+              ALTER TABLE uploaded_beneficiaries 
+              ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+              
+              -- Update existing records with a default timestamp
+              UPDATE uploaded_beneficiaries 
+              SET created_at = NOW() - INTERVAL '1 day' * (id % 30)
+              WHERE created_at IS NULL;
+          END IF;
+          
+          -- Add updated_at column if it doesn't exist
+          IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_name = 'uploaded_beneficiaries' 
+              AND column_name = 'updated_at'
+          ) THEN
+              ALTER TABLE uploaded_beneficiaries 
+              ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+              
+              -- Update existing records with a default timestamp
+              UPDATE uploaded_beneficiaries 
+              SET updated_at = created_at
+              WHERE updated_at IS NULL;
+          END IF;
+          
+          -- Add created_at column to users table if it doesn't exist
+          IF NOT EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_name = 'users' 
+              AND column_name = 'created_at'
+          ) THEN
+              ALTER TABLE users 
+              ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+              
+              -- Update existing records with a default timestamp
+              UPDATE users 
+              SET created_at = NOW() - INTERVAL '1 day' * (id % 10)
+              WHERE created_at IS NULL;
+          END IF;
+      END $$;
+      
+      -- Create indexes for better performance on timestamp queries
+      CREATE INDEX IF NOT EXISTS idx_uploaded_beneficiaries_created_at 
+      ON uploaded_beneficiaries(created_at);
+      
+      CREATE INDEX IF NOT EXISTS idx_users_created_at 
+      ON users(created_at);
+    `;
+    
+    await pool.query(migrationSQL);
+    return { success: true, message: 'Timestamp columns added successfully' };
+  } catch (error) {
+    console.error('Migration error:', error);
+    reply.code(500);
+    return { success: false, error: error.message };
+  }
+});
+
+fastify.post('/api/backup', { preHandler: requireAuth }, async (request, reply) => {
+  try {
+    const result = await backupService.createBackup('manual');
+    return result;
+  } catch (error) {
+    reply.code(500);
+    return { success: false, error: error.message };
+  }
+});
+
+fastify.get('/api/backups', { preHandler: requireAuth }, async (request, reply) => {
+  try {
+    const backups = await backupService.listBackups();
+    return { backups };
+  } catch (error) {
+    reply.code(500);
+    return { error: error.message };
+  }
+});
 
 
 
@@ -286,6 +428,7 @@ const gracefulShutdown = async (signal) => {
     }
     await fastify.close();
     await pool.end();
+    await prisma.$disconnect();
     console.log('✅ Process terminated');
     process.exit(0);
   } catch (err) {

@@ -27,9 +27,11 @@
     "railway-build": "cd client && npm ci && npm run build"
   },
   "dependencies": {
+    "@prisma/client": "^6.15.0",
     "concurrently": "^9.0.1",
     "lottie-react": "^2.4.1",
     "multer": "^2.0.2",
+    "prisma": "^6.15.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "xlsx": "^0.18.5"

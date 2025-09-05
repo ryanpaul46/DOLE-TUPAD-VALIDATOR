@@ -19,6 +19,9 @@ const api = axios.create({
   }
 });
 
+// Prevent infinite loops in interceptors
+api.defaults.retry = false;
+
 // Sanitize for logging
 const sanitizeForLog = (input) => {
   if (typeof input !== 'string') return input;
@@ -27,20 +30,30 @@ const sanitizeForLog = (input) => {
 
 // Enhanced request interceptor
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
     const token = localStorage.getItem("token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     
-    const csrfToken = localStorage.getItem("csrfToken");
-    if (csrfToken && ['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase())) {
-      config.headers['X-CSRF-Token'] = csrfToken;
-    }
-    
-    // Handle multipart form data
-    if (config.data instanceof FormData && csrfToken) {
-      config.headers['X-CSRF-Token'] = csrfToken;
+    // Get CSRF token for state-changing requests
+    if (['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase())) {
+      let csrfToken = localStorage.getItem("csrfToken");
+      
+      // Get fresh CSRF token if we don't have one
+      if (!csrfToken && config.url !== '/api/csrf-token') {
+        try {
+          const csrfResponse = await api.get('/api/csrf-token');
+          csrfToken = csrfResponse.data.csrfToken;
+          localStorage.setItem('csrfToken', csrfToken);
+        } catch (error) {
+          console.error('Failed to get CSRF token:', error);
+        }
+      }
+      
+      if (csrfToken) {
+        config.headers['X-CSRF-Token'] = csrfToken;
+      }
     }
     
     // Enhanced logging for development
@@ -67,7 +80,7 @@ api.interceptors.response.use(
     }
     return response;
   },
-  (error) => {
+  async (error) => {
     // Enhanced error handling
     if (import.meta.env.DEV) {
       console.error('❌ API Response Error:', {
@@ -83,10 +96,29 @@ api.interceptors.response.use(
       localStorage.removeItem("token");
       localStorage.removeItem("role");
       localStorage.removeItem("username");
+      localStorage.removeItem("csrfToken");
       
       // Redirect to login if not already there
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
+      }
+    }
+    
+    // Handle CSRF token errors
+    if (error.response?.status === 403 && 
+        error.response?.data?.message?.includes('CSRF')) {
+      try {
+        // Get new CSRF token
+        const csrfResponse = await api.get('/api/csrf-token');
+        const newToken = csrfResponse.data.csrfToken;
+        localStorage.setItem('csrfToken', newToken);
+        
+        // Retry the original request with new token
+        const originalRequest = error.config;
+        originalRequest.headers['X-CSRF-Token'] = newToken;
+        return api.request(originalRequest);
+      } catch (csrfError) {
+        console.error('Failed to refresh CSRF token:', csrfError);
       }
     }
     

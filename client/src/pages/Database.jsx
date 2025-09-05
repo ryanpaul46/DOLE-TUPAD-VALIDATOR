@@ -7,6 +7,7 @@ import SmartUpload from "../components/SmartUpload";
 import GlobalSearch from "../components/search/GlobalSearch";
 import ExportButton from "../components/search/ExportButton";
 import { useGlobalSearch } from "../hooks/useGlobalSearch";
+import { useCSRF } from "../hooks/useCSRF";
 
 export default function Database() {
   // Get role from outlet context
@@ -29,6 +30,8 @@ export default function Database() {
     handleFilter,
     exportResults
   } = useGlobalSearch();
+  
+  const { refreshCSRFToken } = useCSRF();
 
 
   const fetchData = async () => {
@@ -82,6 +85,10 @@ export default function Database() {
     try {
       setLoading(true);
       setError("");
+      
+      // Get fresh CSRF token
+      await refreshCSRFToken();
+      
       await api.delete("/api/uploaded-beneficiaries");
       await fetchData();
       setFile(null);
@@ -101,6 +108,10 @@ export default function Database() {
     try {
       setLoading(true);
       setError("");
+      
+      // Get fresh CSRF token
+      await refreshCSRFToken();
+      
       await api.delete(`/api/delete-project-series/${encodeURIComponent(selectedProject)}`);
       await fetchData();
       setSelectedProject("");

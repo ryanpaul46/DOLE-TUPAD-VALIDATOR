@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  first_name   String
+  last_name    String
+  username     String   @unique
+  email        String   @unique
+  password_hash String
+  role         String   @default("client")
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt @default(now())
+
+  @@map("users")
+}
+
+model UploadedBeneficiary {
+  id                  Int      @id @default(autoincrement())
+  project_series      String?
+  id_number           String?
+  name                String?
+  first_name          String?
+  middle_name         String?
+  last_name           String?
+  ext_name            String?
+  birthdate           DateTime?
+  barangay            String?
+  city_municipality   String?
+  province            String?
+  district            String?
+  type_of_id          String?
+  id_no               String?
+  contact_no          String?
+  type_of_beneficiary String?
+  occupation          String?
+  sex                 String?
+  civil_status        String?
+  age                 Int?
+  dependent           String?
+  remarks             String?
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt @default(now())
+
+  @@map("uploaded_beneficiaries")
+}

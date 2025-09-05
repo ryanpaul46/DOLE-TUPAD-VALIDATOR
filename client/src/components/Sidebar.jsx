@@ -1,6 +1,6 @@
 import { Nav } from "react-bootstrap";
 import { Link, useLocation } from "react-router-dom";
-import { FaBars, FaTachometerAlt, FaUsers, FaDatabase, FaSearch, FaInfoCircle } from "react-icons/fa";
+import { FaBars, FaTachometerAlt, FaUsers, FaDatabase, FaSearch, FaInfoCircle, FaCogs } from "react-icons/fa";
 
 export default function Sidebar({ role, collapsed, setCollapsed }) {
   const location = useLocation();
@@ -12,6 +12,8 @@ export default function Sidebar({ role, collapsed, setCollapsed }) {
           { label: "Dashboard", path: "/admin", icon: <FaTachometerAlt /> },
           { label: "Manage Users", path: "/admin/users", icon: <FaUsers /> },
           { label: "Database", path: "/admin/database", icon: <FaDatabase /> },
+          { label: "Search Data", path: "/admin/search", icon: <FaSearch /> },
+          { label: "DB Management", path: "/admin/db-management", icon: <FaCogs /> },
           { label: "Summary of Beneficiaries", path: "/admin/summary", icon: <FaSearch /> },
           { label: "About", path: "/admin/about", icon: <FaInfoCircle /> },
         ]

@@ -7,7 +7,11 @@
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate": "npx prisma migrate dev",
+    "prisma:studio": "npx prisma studio",
+    "prisma:push": "npx prisma db push"
   },
   "keywords": [],
   "author": "",
@@ -18,6 +22,7 @@
     "@fastify/multipart": "^9.2.1",
     "@fastify/session": "^11.1.0",
     "@fastify/static": "^8.2.0",
+    "@prisma/client": "^6.15.0",
     "bcrypt": "^6.0.0",
     "bull": "^4.16.5",
     "cors": "^2.8.5",
@@ -26,7 +31,9 @@
     "ioredis": "^5.7.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
     "pg": "^8.16.3",
+    "prisma": "^6.15.0",
     "redis": "^5.8.2",
     "socket.io": "^4.8.1",
     "stream": "^0.0.3",

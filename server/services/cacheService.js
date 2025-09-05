@@ -1,160 +1,131 @@
-import redis from 'redis';
+import Redis from 'ioredis';
 
 class CacheService {
   constructor() {
-    this.client = null;
+    this.redis = null;
     this.isConnected = false;
-    this.initialize();
+    this.init();
   }
 
-  async initialize() {
+  init() {
     try {
-      // Only initialize Redis if it's available
-      if (process.env.REDIS_URL || process.env.NODE_ENV === 'production') {
-        this.client = redis.createClient({
-          url: process.env.REDIS_URL || 'redis://localhost:6379'
-        });
+      this.redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: process.env.REDIS_PORT || 6379,
+        password: process.env.REDIS_PASSWORD,
+        retryDelayOnFailover: 100,
+        maxRetriesPerRequest: 3,
+        lazyConnect: true
+      });
 
-        this.client.on('error', (err) => {
-          console.warn('⚠️ Redis connection error - caching disabled:', err.message?.replace(/[\r\n\t]/g, '_')?.substring(0, 100) || 'Unknown error');
-          this.isConnected = false;
-        });
+      this.redis.on('connect', () => {
+        console.log('✅ Redis connected');
+        this.isConnected = true;
+      });
 
-        this.client.on('connect', () => {
-          console.log('✅ Redis cache connected');
-          this.isConnected = true;
-        });
-
-        await this.client.connect();
-      } else {
+      this.redis.on('error', (err) => {
         console.log('💡 Redis caching not configured - running without cache');
-      }
+        this.isConnected = false;
+      });
+
     } catch (error) {
-      console.warn('⚠️ Redis initialization failed - caching disabled:', error.message?.replace(/[\r\n\t]/g, '_')?.substring(0, 100) || 'Unknown error');
+      console.log('💡 Redis caching not configured - running without cache');
       this.isConnected = false;
     }
   }
 
-  /**
-   * Get cached value
-   */
   async get(key) {
-    if (!this.isConnected || !this.client) {
-      return null;
-    }
-
+    if (!this.isConnected) return null;
     try {
-      const value = await this.client.get(key);
-      return value ? JSON.parse(value) : null;
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.warn('Cache get error:', error.message);
+      console.error('Cache get error:', error);
       return null;
     }
   }
 
-  /**
-   * Set cached value with TTL (time to live in seconds)
-   */
-  async set(key, value, ttl = 3600) {
-    if (!this.isConnected || !this.client) {
-      return false;
-    }
-
+  async set(key, value, ttl = 300) {
+    if (!this.isConnected) return false;
     try {
-      await this.client.setEx(key, ttl, JSON.stringify(value));
+      await this.redis.setex(key, ttl, JSON.stringify(value));
       return true;
     } catch (error) {
-      console.warn('Cache set error:', error.message);
+      console.error('Cache set error:', error);
       return false;
     }
   }
 
-  /**
-   * Delete cached value
-   */
   async del(key) {
-    if (!this.isConnected || !this.client) {
-      return false;
-    }
-
+    if (!this.isConnected) return false;
     try {
-      await this.client.del(key);
+      await this.redis.del(key);
       return true;
     } catch (error) {
-      console.warn('Cache delete error:', error.message);
+      console.error('Cache delete error:', error);
       return false;
     }
   }
 
-  /**
-   * Check if a name exists in cache (for duplicate detection)
-   */
-  async isDuplicate(name) {
-    const cacheKey = `duplicate:${name.toLowerCase().trim()}`;
-    return await this.get(cacheKey);
-  }
-
-  /**
-   * Cache duplicate status
-   */
-  async cacheDuplicate(name, isDuplicate, record = null) {
-    const cacheKey = `duplicate:${name.toLowerCase().trim()}`;
-    await this.set(cacheKey, { isDuplicate, record }, 1800); // 30 minutes
-  }
-
-  /**
-   * Cache database lookup map
-   */
-  async cacheNameLookup(nameMap) {
-    const cacheKey = 'name_lookup_map';
-    await this.set(cacheKey, Array.from(nameMap.entries()), 1800);
-  }
-
-  /**
-   * Get cached name lookup map
-   */
-  async getCachedNameLookup() {
-    const cacheKey = 'name_lookup_map';
-    const cached = await this.get(cacheKey);
-    return cached ? new Map(cached) : null;
-  }
-
-  /**
-   * Clear all cache
-   */
   async clearAll() {
-    if (!this.isConnected || !this.client) {
-      return false;
-    }
-
+    if (!this.isConnected) return false;
     try {
-      await this.client.flushAll();
+      await this.redis.flushall();
       return true;
     } catch (error) {
-      console.warn('Cache clear error:', error.message);
+      console.error('Cache clear error:', error);
       return false;
     }
   }
 
-  /**
-   * Get cache statistics
-   */
   async getStats() {
-    if (!this.isConnected || !this.client) {
-      return { connected: false, error: 'Redis not connected' };
+    if (!this.isConnected) {
+      return { connected: false, message: 'Redis not configured' };
     }
-
+    
     try {
-      const info = await this.client.info('memory');
+      const info = await this.redis.info('memory');
+      const keyCount = await this.redis.dbsize();
+      
       return {
-        connected: this.isConnected,
-        info: info
+        connected: true,
+        keyCount,
+        memory: info.split('\n').find(line => line.startsWith('used_memory_human'))?.split(':')[1]?.trim()
       };
     } catch (error) {
       return { connected: false, error: error.message };
     }
   }
+
+  // Cache wrapper for database queries
+  async cached(key, fetchFunction, ttl = 300) {
+    const cached = await this.get(key);
+    if (cached) return cached;
+
+    const data = await fetchFunction();
+    await this.set(key, data, ttl);
+    return data;
+  }
+
+  // Statistics caching
+  async cacheStatistics(data) {
+    await this.set('admin_statistics', data, 60); // 1 minute TTL
+  }
+
+  async getCachedStatistics() {
+    return await this.get('admin_statistics');
+  }
+
+  // Search results caching
+  async cacheSearchResults(query, filters, results) {
+    const key = `search:${JSON.stringify({ query, filters })}`;
+    await this.set(key, results, 120); // 2 minutes TTL
+  }
+
+  async getCachedSearchResults(query, filters) {
+    const key = `search:${JSON.stringify({ query, filters })}`;
+    return await this.get(key);
+  }
 }
 
-// Export singleton instance
 export default new CacheService();
