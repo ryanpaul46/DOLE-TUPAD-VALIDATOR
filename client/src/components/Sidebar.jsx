@@ -1,6 +1,6 @@
 import { Nav } from "react-bootstrap";
 import { Link, useLocation } from "react-router-dom";
-import { FaBars, FaTachometerAlt, FaUsers, FaDatabase, FaSearch } from "react-icons/fa";
+import { FaBars, FaTachometerAlt, FaUsers, FaDatabase, FaSearch, FaInfoCircle } from "react-icons/fa";
 
 export default function Sidebar({ role, collapsed, setCollapsed }) {
   const location = useLocation();
@@ -13,12 +13,14 @@ export default function Sidebar({ role, collapsed, setCollapsed }) {
           { label: "Manage Users", path: "/admin/users", icon: <FaUsers /> },
           { label: "Database", path: "/admin/database", icon: <FaDatabase /> },
           { label: "Summary of Beneficiaries", path: "/admin/summary", icon: <FaSearch /> },
+          { label: "About", path: "/admin/about", icon: <FaInfoCircle /> },
         ]
       : [
           { label: "Client Dashboard", path: "/client", icon: <FaTachometerAlt /> },
           { label: "Detect Duplicate", path: "/client/detect-duplicate", icon: <FaSearch /> },
           { label: "Database", path: "/client/database", icon: <FaDatabase /> },
           { label: "Summary of Beneficiaries", path: "/client/summary", icon: <FaSearch /> },
+          { label: "About", path: "/client/about", icon: <FaInfoCircle /> },
         ];
 
   // Handle toggle explicitly
