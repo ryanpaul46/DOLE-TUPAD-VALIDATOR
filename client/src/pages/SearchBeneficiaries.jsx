@@ -1,73 +1,71 @@
-import { useState } from 'react';
-import { Container, Row, Col, Card, Table, Pagination, Alert, Badge, Button } from 'react-bootstrap';
-import { Eye, Download } from 'react-bootstrap-icons';
-import GlobalSearch from '../components/search/GlobalSearch';
-import ExportButton from '../components/search/ExportButton';
-import { useGlobalSearch } from '../hooks/useGlobalSearch';
+import { useState, useEffect, useMemo } from 'react';
+import { Container, Row, Col, Card, Table, Pagination, Alert, Badge, Button, Form, InputGroup, Spinner, Modal } from 'react-bootstrap';
+import { Eye, FileText, Search } from 'react-bootstrap-icons';
 import { useToast } from '../hooks/useToast';
 import ToastContainer from '../components/ToastContainer';
+import api from '../api/axios';
 
-const SearchBeneficiaries = () => {
+const BeneficiariesManager = () => {
+  const [data, setData] = useState([]);
+  const [columns, setColumns] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [viewMode, setViewMode] = useState('summary'); // 'summary' or 'search'
   const [selectedBeneficiary, setSelectedBeneficiary] = useState(null);
+  const [showModal, setShowModal] = useState(false);
   const { toasts, showToast, removeToast } = useToast();
-  
-  const {
-    searchResults,
-    loading,
-    error,
-    totalResults,
-    currentPage,
-    handleSearch,
-    handleFilter,
-    handlePageChange,
-    exportResults
-  } = useGlobalSearch();
 
-  const handleExport = async (data, filename, format) => {
+  const fetchData = async () => {
     try {
-      await exportResults(format);
-      showToast(`Data exported successfully as ${format.toUpperCase()}`, 'success');
-    } catch (error) {
-      showToast('Failed to export data', 'danger');
+      setLoading(true);
+      const [columnsRes, dataRes] = await Promise.all([
+        api.get('/api/uploaded-columns'),
+        api.get('/api/uploaded-beneficiaries')
+      ]);
+      setColumns(columnsRes.data.filter(col => col.column_name !== 'id'));
+      setData(dataRes.data);
+    } catch (err) {
+      setError('Failed to fetch data');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const totalPages = Math.ceil(totalResults / 50);
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  const renderPagination = () => {
-    if (totalPages <= 1) return null;
-
-    const items = [];
-    const maxVisible = 5;
-    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    let end = Math.min(totalPages, start + maxVisible - 1);
-
-    if (end - start + 1 < maxVisible) {
-      start = Math.max(1, end - maxVisible + 1);
-    }
-
-    for (let i = start; i <= end; i++) {
-      items.push(
-        <Pagination.Item
-          key={i}
-          active={i === currentPage}
-          onClick={() => handlePageChange(i)}
-        >
-          {i}
-        </Pagination.Item>
-      );
-    }
-
-    return (
-      <Pagination className="justify-content-center">
-        <Pagination.First onClick={() => handlePageChange(1)} disabled={currentPage === 1} />
-        <Pagination.Prev onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} />
-        {items}
-        <Pagination.Next onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage === totalPages} />
-        <Pagination.Last onClick={() => handlePageChange(totalPages)} disabled={currentPage === totalPages} />
-      </Pagination>
+  const filteredData = useMemo(() => {
+    if (!searchTerm) return data;
+    return data.filter(row => 
+      Object.values(row).some(value => 
+        value?.toString().toLowerCase().includes(searchTerm.toLowerCase())
+      )
     );
+  }, [data, searchTerm]);
+
+  const itemsPerPage = 20;
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage) || 1;
+  const paginatedData = filteredData.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  useEffect(() => setCurrentPage(1), [searchTerm]);
+
+  const handleViewDetails = (beneficiary) => {
+    setSelectedBeneficiary(beneficiary);
+    setShowModal(true);
   };
+
+  const handleCloseModal = () => {
+    setShowModal(false);
+    setSelectedBeneficiary(null);
+  };
+
+
 
   return (
     <Container fluid className="p-4">
@@ -75,37 +73,49 @@ const SearchBeneficiaries = () => {
       
       <Row className="mb-4">
         <Col>
-          <h2>Search Beneficiaries</h2>
-          <p className="text-muted">Search and filter through all beneficiary records</p>
+          <div className="d-flex justify-content-between align-items-center">
+            <div className="d-flex align-items-center">
+              <FileText className="me-2" size={28} />
+              <div>
+                <h2 className="mb-0">Beneficiaries Manager</h2>
+                <p className="text-muted mb-0">Search and manage beneficiary records</p>
+              </div>
+            </div>
+            <div>
+              <Button 
+                variant={viewMode === 'summary' ? 'primary' : 'outline-primary'}
+                className="me-2"
+                onClick={() => setViewMode('summary')}
+              >
+                Summary View
+              </Button>
+              <Button 
+                variant={viewMode === 'search' ? 'primary' : 'outline-primary'}
+                onClick={() => setViewMode('search')}
+              >
+                Search View
+              </Button>
+            </div>
+          </div>
         </Col>
       </Row>
 
       <Row className="mb-4">
         <Col>
-          <Card>
-            <Card.Body>
-              <GlobalSearch
-                onSearch={handleSearch}
-                onFilter={handleFilter}
-                placeholder="Search by name, ID, province, or any field..."
-              />
-              
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <Badge bg="info" className="me-2">
-                    {totalResults.toLocaleString()} results found
-                  </Badge>
-                  {loading && <Badge bg="secondary">Searching...</Badge>}
-                </div>
-                <ExportButton
-                  data={searchResults}
-                  filename="beneficiaries_search"
-                  onExport={handleExport}
-                  disabled={loading || searchResults.length === 0}
-                />
-              </div>
-            </Card.Body>
-          </Card>
+          <InputGroup>
+            <InputGroup.Text><Search /></InputGroup.Text>
+            <Form.Control
+              type="text"
+              placeholder="Search beneficiaries..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>
+                Clear
+              </Button>
+            )}
+          </InputGroup>
         </Col>
       </Row>
 
@@ -117,70 +127,173 @@ const SearchBeneficiaries = () => {
         </Row>
       )}
 
-      <Row>
-        <Col>
-          <Card>
-            <Card.Body>
-              {searchResults.length > 0 ? (
-                <>
-                  <div className="table-responsive">
-                    <Table striped bordered hover size="sm">
-                      <thead className="table-dark">
-                        <tr>
-                          <th>Name</th>
-                          <th>ID Number</th>
-                          <th>Province</th>
-                          <th>Municipality</th>
-                          <th>Project Series</th>
-                          <th>Gender</th>
-                          <th>Age</th>
-                          <th>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {searchResults.map((beneficiary, index) => (
-                          <tr key={beneficiary.id || index}>
-                            <td className="fw-bold">{beneficiary.name || 'N/A'}</td>
-                            <td>{beneficiary.id_number || 'N/A'}</td>
-                            <td>{beneficiary.province || 'N/A'}</td>
-                            <td>{beneficiary.city_municipality || 'N/A'}</td>
-                            <td>
-                              <Badge bg="primary" className="small">
-                                {beneficiary.project_series || 'N/A'}
-                              </Badge>
-                            </td>
-                            <td>{beneficiary.sex || 'N/A'}</td>
-                            <td>{beneficiary.age || 'N/A'}</td>
-                            <td>
-                              <Button
-                                size="sm"
-                                variant="outline-primary"
-                                onClick={() => setSelectedBeneficiary(beneficiary)}
-                              >
-                                <Eye size={14} />
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  </div>
-                  
-                  {renderPagination()}
-                </>
-              ) : (
-                <div className="text-center py-5">
-                  <p className="text-muted">
-                    {loading ? 'Searching...' : 'No beneficiaries found matching your criteria'}
-                  </p>
+      {loading && (
+        <div className="d-flex justify-content-center my-4">
+          <Spinner animation="border" />
+        </div>
+      )}
+      
+      {error && <Alert variant="danger">{error}</Alert>}
+      
+      {!loading && filteredData.length === 0 && !error && (
+        <Alert variant="info">
+          {searchTerm ? 'No results found.' : 'No data available.'}
+        </Alert>
+      )}
+
+      {!loading && filteredData.length > 0 && (
+        <Row>
+          <Col>
+            <Card>
+              <Card.Header>
+                <div className="d-flex justify-content-between align-items-center">
+                  <span>Beneficiaries ({viewMode === 'summary' ? 'Summary' : 'Search'} View)</span>
+                  <Badge bg="info">
+                    {filteredData.length} of {data.length} records
+                  </Badge>
                 </div>
+              </Card.Header>
+              <Card.Body className="p-0">
+                <div className="table-responsive" style={{ maxHeight: '60vh', overflow: 'auto' }}>
+                  <Table striped bordered hover size="sm">
+                    <thead className="position-sticky top-0 bg-light">
+                      <tr>
+                        {viewMode === 'search' ? (
+                          <>
+                            <th>Name</th>
+                            <th>ID Number</th>
+                            <th>Province</th>
+                            <th>Municipality</th>
+                            <th>Project Series</th>
+                            <th>Gender</th>
+                            <th>Age</th>
+                            <th>Actions</th>
+                          </>
+                        ) : (
+                          <>
+                            {columns.map((col, idx) => (
+                              <th key={idx}>
+                                {col.column_name.split('_').map(word => 
+                                  word.charAt(0).toUpperCase() + word.slice(1)
+                                ).join(' ')}
+                              </th>
+                            ))}
+                            <th>Actions</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginatedData.map((row, rowIdx) => (
+                        <tr key={rowIdx}>
+                          {viewMode === 'search' ? (
+                            <>
+                              <td className="fw-bold">{row.name || 'N/A'}</td>
+                              <td>{row.id_number || 'N/A'}</td>
+                              <td>{row.province || 'N/A'}</td>
+                              <td>{row.city_municipality || 'N/A'}</td>
+                              <td>
+                                <Badge bg="primary" className="small">
+                                  {row.project_series || 'N/A'}
+                                </Badge>
+                              </td>
+                              <td>{row.sex || 'N/A'}</td>
+                              <td>{row.age || 'N/A'}</td>
+                              <td>
+                                <Button
+                                  variant="outline-primary"
+                                  size="sm"
+                                  onClick={() => handleViewDetails(row)}
+                                  title="View Details"
+                                >
+                                  <Eye size={16} />
+                                </Button>
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              {columns.map((col, colIdx) => (
+                                <td key={colIdx}>
+                                  {col.column_name === 'birthdate' && row[col.column_name] 
+                                    ? new Date(row[col.column_name]).toLocaleDateString()
+                                    : row[col.column_name] || ''
+                                  }
+                                </td>
+                              ))}
+                              <td>
+                                <Button
+                                  variant="outline-primary"
+                                  size="sm"
+                                  onClick={() => handleViewDetails(row)}
+                                  title="View Details"
+                                >
+                                  <Eye size={16} />
+                                </Button>
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                </div>
+              </Card.Body>
+              {totalPages > 1 && (
+                <Card.Footer>
+                  <div className="d-flex justify-content-center">
+                    <Pagination size="sm">
+                      <Pagination.Prev
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => p - 1)}
+                      />
+                      <Pagination.Item active>{currentPage}</Pagination.Item>
+                      <Pagination.Next
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => p + 1)}
+                      />
+                    </Pagination>
+                  </div>
+                </Card.Footer>
               )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+            </Card>
+          </Col>
+        </Row>
+      )}
+
+      {/* Beneficiary Details Modal */}
+      <Modal show={showModal} onHide={handleCloseModal} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>Beneficiary Details</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {selectedBeneficiary && (
+            <Row>
+              {columns.map((col, idx) => (
+                <Col md={6} key={idx} className="mb-3">
+                  <strong>
+                    {col.column_name.split('_').map(word => 
+                      word.charAt(0).toUpperCase() + word.slice(1)
+                    ).join(' ')}:
+                  </strong>
+                  <div className="text-muted">
+                    {col.column_name === 'birthdate' && selectedBeneficiary[col.column_name]
+                      ? new Date(selectedBeneficiary[col.column_name]).toLocaleDateString()
+                      : selectedBeneficiary[col.column_name] || 'N/A'
+                    }
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseModal}>
+            Close
+          </Button>
+        </Modal.Footer>
+      </Modal>
     </Container>
   );
 };
 
-export default SearchBeneficiaries;
+export default BeneficiariesManager;

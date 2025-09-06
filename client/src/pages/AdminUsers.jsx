@@ -26,6 +26,7 @@ export default function AdminUsers() {
     last_name: "",
     email: "",
     role: "client",
+    field_office: "",
   });
 
   const navigate = useNavigate();
@@ -131,6 +132,7 @@ export default function AdminUsers() {
       last_name: "",
       email: "",
       role: "client",
+      field_office: "",
     });
   };
 
@@ -155,7 +157,7 @@ export default function AdminUsers() {
           <thead>
             <tr>
               <th>ID</th><th>First</th><th>Last</th><th>Username</th>
-              <th>Email</th><th>Role</th><th>Actions</th><th>Created At</th>
+              <th>Email</th><th>Role</th><th>Field Office</th><th>Actions</th><th>Created At</th>
             </tr>
           </thead>
           <tbody>
@@ -168,6 +170,7 @@ export default function AdminUsers() {
                   <td>{u.username}</td>
                   <td>{u.email}</td>
                   <td>{u.role}</td>
+                  <td>{u.field_office || 'N/A'}</td>
                   <td>
                     <button
                       className="btn btn-warning btn-sm me-2"
@@ -187,7 +190,7 @@ export default function AdminUsers() {
               ))
             ) : (
               <tr>
-                <td colSpan="8" className="text-center text-muted">
+                <td colSpan="9" className="text-center text-muted">
                   No users found
                 </td>
               </tr>
@@ -269,6 +272,25 @@ export default function AdminUsers() {
               >
                 <option value="client">Client</option>
                 <option value="admin">Admin</option>
+                <option value="superadmin">Super Admin</option>
+                <option value="validator">Validator</option>
+              </Form.Select>
+            </Form.Group>
+
+            <Form.Group className="mb-3">
+              <Form.Label>Field Office</Form.Label>
+              <Form.Select
+                name="field_office"
+                value={formUser.field_office}
+                onChange={handleChange}
+              >
+                <option value="">Select Field Office</option>
+                <option value="INFO">Ilocos Norte Field Office</option>
+                <option value="ISFO">Ilocos Sur Field Office</option>
+                <option value="LUFO">La Union Field Office</option>
+                <option value="EPFO">Eastern Pangasinan Field Office</option>
+                <option value="WPFO">Western Pangasinan Field Office</option>
+                <option value="CPFO">Central Pangasinan Field Office</option>
               </Form.Select>
             </Form.Group>
           </Modal.Body>

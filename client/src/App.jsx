@@ -4,9 +4,7 @@ import AdminUsers from "./pages/AdminUsers";
 import ClientMain from "./pages/Client";
 import Database from "./pages/Database";
 import DetectDuplicate from "./pages/DetectDuplicate";
-import SummaryofBeneficiaries from "./pages/SummaryofBeneficiaries";
 import SearchBeneficiaries from "./pages/SearchBeneficiaries";
-import DatabaseManagement from "./pages/DatabaseManagement";
 import About from "./pages/About";
 import Login from "./pages/Login";
 import AppLayout from "./layouts/AppLayout";
@@ -26,8 +24,6 @@ function App() {
             <Route path="users" element={<AdminUsers />} />
             <Route path="database" element={<Database />} />
             <Route path="search" element={<SearchBeneficiaries />} />
-            <Route path="db-management" element={<DatabaseManagement />} />
-            <Route path="summary" element={<SummaryofBeneficiaries />} />
             <Route path="about" element={<About />} />
           </Route>
         </Route>
@@ -39,7 +35,6 @@ function App() {
             <Route path="detect-duplicate" element={<DetectDuplicate />} />
             <Route path="database" element={<Database />} />
             <Route path="search" element={<SearchBeneficiaries />} />
-            <Route path="summary" element={<SummaryofBeneficiaries />} />
             <Route path="about" element={<About />} />
           </Route>
         </Route>

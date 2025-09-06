@@ -12,7 +12,7 @@ const sanitizeForLog = (input) => {
 export const getAllUsers = async (request, reply) => {
   try {
     const result = await pool.query(
-      "SELECT id, username, first_name, last_name, email, role, created_at FROM users ORDER BY id ASC"
+      "SELECT id, username, first_name, last_name, email, role, field_office, created_at FROM users ORDER BY id ASC"
     );
     return result.rows;
   } catch (err) {
@@ -24,7 +24,7 @@ export const getAllUsers = async (request, reply) => {
 
 // CREATE new user
 export const createUser = async (request, reply) => {
-  const { username, password, first_name, last_name, email, role } = request.body;
+  const { username, password, first_name, last_name, email, role, field_office } = request.body;
 
   if (!username || !password || !first_name || !last_name || !email) {
     reply.code(400);
@@ -44,10 +44,10 @@ export const createUser = async (request, reply) => {
 
     // insert using password_hash column
     const result = await pool.query(
-      `INSERT INTO users (username, password_hash, first_name, last_name, email, role) 
-       VALUES ($1, $2, $3, $4, $5, $6) 
-       RETURNING id, username, first_name, last_name, email, role, created_at`,
-      [username, hashedPassword, first_name, last_name, email, role || "client"]
+      `INSERT INTO users (username, password_hash, first_name, last_name, email, role, field_office) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING id, username, first_name, last_name, email, role, field_office, created_at`,
+      [username, hashedPassword, first_name, last_name, email, role || "client", field_office]
     );
 
     reply.code(201);
@@ -62,7 +62,7 @@ export const createUser = async (request, reply) => {
 // UPDATE user (optionally update password)
 export const updateUser = async (request, reply) => {
   const { id } = request.params;
-  const { username, first_name, last_name, email, role, password } = request.body;
+  const { username, first_name, last_name, email, role, field_office, password } = request.body;
 
   try {
     // If password is provided, hash it
@@ -74,10 +74,10 @@ export const updateUser = async (request, reply) => {
     // Update other fields
     const result = await pool.query(
       `UPDATE users 
-       SET username=$1, first_name=$2, last_name=$3, email=$4, role=$5
-       WHERE id=$6
-       RETURNING id, username, first_name, last_name, email, role, created_at`,
-      [username, first_name, last_name, email, role, id]
+       SET username=$1, first_name=$2, last_name=$3, email=$4, role=$5, field_office=$6
+       WHERE id=$7
+       RETURNING id, username, first_name, last_name, email, role, field_office, created_at`,
+      [username, first_name, last_name, email, role, field_office, id]
     );
 
     if (result.rows.length === 0) {

@@ -65,9 +65,10 @@ const GlobalSearch = ({ onSearch, onFilter, filters = {}, placeholder = "Search 
                   onChange={(e) => handleFilterChange('province', e.target.value)}
                 >
                   <option value="">All Provinces</option>
-                  <option value="Metro Manila">Metro Manila</option>
-                  <option value="Cebu">Cebu</option>
-                  <option value="Davao">Davao</option>
+                  <option value="Ilocos Norte">Ilocos Norte</option>
+                  <option value="Ilocos Sur">Ilocos Sur</option>
+                  <option value="La Union">La Union</option>
+                  <option value="Pangasinan">Pangasinan</option>
                 </Form.Select>
               </Form.Group>
               <Form.Group className="mb-2">

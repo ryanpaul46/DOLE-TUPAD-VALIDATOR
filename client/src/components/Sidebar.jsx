@@ -12,16 +12,14 @@ export default function Sidebar({ role, collapsed, setCollapsed }) {
           { label: "Dashboard", path: "/admin", icon: <FaTachometerAlt /> },
           { label: "Manage Users", path: "/admin/users", icon: <FaUsers /> },
           { label: "Database", path: "/admin/database", icon: <FaDatabase /> },
-          { label: "Search Data", path: "/admin/search", icon: <FaSearch /> },
-          { label: "DB Management", path: "/admin/db-management", icon: <FaCogs /> },
-          { label: "Summary of Beneficiaries", path: "/admin/summary", icon: <FaSearch /> },
+          { label: "Beneficiaries Manager", path: "/admin/search", icon: <FaSearch /> },
           { label: "About", path: "/admin/about", icon: <FaInfoCircle /> },
         ]
       : [
           { label: "Client Dashboard", path: "/client", icon: <FaTachometerAlt /> },
           { label: "Detect Duplicate", path: "/client/detect-duplicate", icon: <FaSearch /> },
           { label: "Database", path: "/client/database", icon: <FaDatabase /> },
-          { label: "Summary of Beneficiaries", path: "/client/summary", icon: <FaSearch /> },
+          { label: "Beneficiaries Manager", path: "/client/search", icon: <FaSearch /> },
           { label: "About", path: "/client/about", icon: <FaInfoCircle /> },
         ];
 
